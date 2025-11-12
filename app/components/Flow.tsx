@@ -12,6 +12,7 @@ import {
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
+  reconnectEdge,          // ✅ v12 helper
   useReactFlow,
   type Node,
   type Edge,
@@ -22,6 +23,7 @@ import {
   type BuiltInNode,
   type BuiltInEdge,
   type NodeTypes,
+  type Connection,        // for onReconnect args
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -33,15 +35,17 @@ type SkillData = {
   level?: number;
 };
 
-/** ---------- Custom node & unions (per docs) ---------- */
-// A specific node type called 'skill' that carries SkillData
+/** ---------- Custom node & unions ---------- */
 type SkillNode = Node<SkillData, 'skill'>;
-
-// Unions of ALL nodes/edges in your app (add more as you grow)
 type AppNode = BuiltInNode | SkillNode;
-type AppEdge = BuiltInEdge; // you can define custom edges later and union them here
+type AppEdge = BuiltInEdge;
 
-/** ---------- Custom node component (typed) ---------- */
+// put these OUTSIDE the component so they don't re-create every render
+const FIT_VIEW = { padding: 0.2 } as const;
+const DEFAULT_EDGE_OPTIONS = { animated: true } as const;
+const DELETE_KEYS = ['Delete', 'Backspace'] as const;
+
+/** ---------- Custom node component ---------- */
 function SkillNodeComponent({ data }: NodeProps<SkillNode>) {
   const { name, description, cost, level } = data;
 
@@ -98,30 +102,31 @@ const initialNodes: AppNode[] = [
 
 const initialEdges: AppEdge[] = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
 
-/** ---------- Component ---------- */
 export default function Flow() {
-  // Typed state with your unions
+  /** Graph state */
   const [nodes, setNodes] = useState<AppNode[]>(initialNodes);
   const [edges, setEdges] = useState<AppEdge[]>(initialEdges);
 
-  // Form/UX state
+  /** Form / UX */
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [cost, setCost] = useState('');
   const [level, setLevel] = useState('');
   const [placeMode, setPlaceMode] = useState(false);
   const [autoConnect, setAutoConnect] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  // ID source
+  /** Selection */
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
+
+  /** ID source */
   const idRef = useRef(3);
   const nextId = () => String(idRef.current++);
 
-  // Get instance with correctly typed generics (Node/Edge unions)
-  // The docs show passing your custom node & edge types here. :contentReference[oaicite:1]{index=1}
-  const { screenToFlowPosition } = useReactFlow<AppNode, AppEdge>();
+  /** Instance (typed with your unions) */
+  const { screenToFlowPosition, deleteElements } = useReactFlow<AppNode, AppEdge>();
 
-  /** ---------- Typed change handlers (pass your Node union) ---------- */
+  /** Changes (typed) */
   const onNodesChange: OnNodesChange<AppNode> = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges<AppNode>(changes, nds)),
     []
@@ -137,7 +142,15 @@ export default function Flow() {
     []
   );
 
-  /** ---------- Build new Skill node (returns a SkillNode, not data) ---------- */
+  /** ✅ v12 edge reconnection */
+  const onReconnect = useCallback(
+    (oldEdge: AppEdge, newConnection: Connection) => {
+      setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
+    },
+    []
+  );
+
+  /** Build a new Skill node */
   const buildNode = useCallback(
     (position: { x: number; y: number }): SkillNode => {
       const id = nextId();
@@ -161,27 +174,27 @@ export default function Flow() {
     [name, description, cost, level]
   );
 
-  /** ---------- Place by clicking the pane ---------- */
+  /** Place by clicking the pane */
   const handlePaneClick = useCallback(
     (evt: React.MouseEvent) => {
       if (!placeMode) return;
       const pos = screenToFlowPosition({ x: evt.clientX, y: evt.clientY });
       const node = buildNode(pos);
 
-      // ✅ Append the NODE (typed as SkillNode, compatible with AppNode union)
       setNodes((nds) => nds.concat(node));
 
-      if (autoConnect && selectedId) {
+      if (autoConnect && selectedNodeIds[0]) {
+        const from = selectedNodeIds[0];
         setEdges((eds) =>
-          addEdge<AppEdge>({ id: `e${selectedId}-${node.id}`, source: selectedId, target: node.id, animated: true }, eds)
+          addEdge<AppEdge>({ id: `e${from}-${node.id}`, source: from, target: node.id, animated: true }, eds)
         );
       }
       setPlaceMode(false);
     },
-    [placeMode, screenToFlowPosition, buildNode, autoConnect, selectedId]
+    [placeMode, screenToFlowPosition, buildNode, autoConnect, selectedNodeIds]
   );
 
-  /** ---------- Add near the center of the current renderer ---------- */
+  /** Add at center */
   const addAtCenter = useCallback(() => {
     const renderer = document.querySelector('.react-flow__renderer') as HTMLElement | null;
     if (!renderer) return;
@@ -192,29 +205,61 @@ export default function Flow() {
 
     setNodes((nds) => nds.concat(node));
 
-    if (autoConnect && selectedId) {
+    if (autoConnect && selectedNodeIds[0]) {
+      const from = selectedNodeIds[0];
       setEdges((eds) =>
-        addEdge<AppEdge>({ id: `e${selectedId}-${node.id}`, source: selectedId, target: node.id, animated: true }, eds)
+        addEdge<AppEdge>({ id: `e${from}-${node.id}`, source: from, target: node.id, animated: true }, eds)
       );
     }
-  }, [screenToFlowPosition, buildNode, autoConnect, selectedId]);
+  }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds]);
 
-  /** ---------- Track selection for auto-connect ---------- */
-  const onSelectionChange = useCallback(
-    ({ nodes: selectedNodes }: { nodes: AppNode[]; edges: AppEdge[] }) => {
-      setSelectedId(selectedNodes[0]?.id ?? null);
+  function shallowEqualIds(a: string[], b: string[]) {
+    if (a === b) return true;
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+// ✅ stable, guarded selection handler
+const onSelectionChange = useCallback(
+    ({ nodes: ns, edges: es }: { nodes: AppNode[]; edges: AppEdge[] }) => {
+      const nodeIds = ns.map((n) => n.id);
+      const edgeIds = es.map((e) => e.id);
+  
+      setSelectedNodeIds((prev) => (shallowEqualIds(prev, nodeIds) ? prev : nodeIds));
+      setSelectedEdgeIds((prev) => (shallowEqualIds(prev, edgeIds) ? prev : edgeIds));
     },
     []
   );
+  
+
+  /** Delete selected nodes/edges */
+  const deleteSelected = useCallback(() => {
+    const nodesToDelete = nodes.filter((n) => selectedNodeIds.includes(n.id));
+    const edgesToDelete = edges.filter((e) => selectedEdgeIds.includes(e.id));
+    if (nodesToDelete.length === 0 && edgesToDelete.length === 0) return;
+
+    deleteElements({ nodes: nodesToDelete, edges: edgesToDelete });
+    setSelectedNodeIds([]);
+    setSelectedEdgeIds([]);
+  }, [deleteElements, nodes, edges, selectedNodeIds, selectedEdgeIds]);
+
+  /** Detach: remove all edges connected to selected nodes */
+  const detachSelectedNodes = useCallback(() => {
+    if (selectedNodeIds.length === 0) return;
+    setEdges((eds) =>
+      eds.filter((e) => !selectedNodeIds.includes(e.source) && !selectedNodeIds.includes(e.target))
+    );
+  }, [selectedNodeIds]);
 
   const canSubmit = useMemo(() => name.trim().length > 0, [name]);
 
   return (
-    <div className="h-[72vh] w-full overflow-hidden rounded-xl border border-zinc-200 bg-white/80 text-black dark:border-zinc-800 dark:bg-zinc-900/40">
+    <div className="h-[82vh] w-full overflow-hidden rounded-xl border border-zinc-200 bg-white/80 text-black dark:border-zinc-800 dark:bg-zinc-900/40">
       {/* Toolbar */}
       <div className="flex flex-wrap items-end gap-2 border-b border-zinc-200 text-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex flex-col">
-          <label className="text-xs text-zinc-500">Name *</label>
+          <label className="text-xs text-white">Name *</label>
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -222,8 +267,9 @@ export default function Flow() {
             className="h-8 w-48 rounded border border-zinc-300 bg-white px-2 text-sm dark:bg-zinc-800"
           />
         </div>
+
         <div className="flex min-w-[16rem] flex-1 flex-col">
-          <label className="text-xs text-zinc-500">Description</label>
+          <label className="text-xs text-white">Description</label>
           <input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
@@ -231,8 +277,9 @@ export default function Flow() {
             className="h-8 rounded border border-zinc-300 bg-white px-2 text-sm dark:bg-zinc-800"
           />
         </div>
+
         <div className="flex flex-col">
-          <label className="text-xs text-zinc-500">Cost (optional)</label>
+          <label className="text-xs text-white">Cost (optional)</label>
           <input
             value={cost}
             onChange={(e) => setCost(e.target.value.replace(/[^0-9]/g, ''))}
@@ -241,8 +288,9 @@ export default function Flow() {
             className="h-8 w-24 rounded border border-zinc-300 bg-white px-2 text-sm dark:bg-zinc-800"
           />
         </div>
+
         <div className="flex flex-col">
-          <label className="text-xs text-zinc-500">Level (optional)</label>
+          <label className="text-xs text-white">Level (optional)</label>
           <input
             value={level}
             onChange={(e) => setLevel(e.target.value.replace(/[^0-9]/g, ''))}
@@ -257,14 +305,12 @@ export default function Flow() {
           <button
             onClick={() => setPlaceMode((v) => !v)}
             disabled={!canSubmit && !placeMode}
-            style={{ cursor: 'pointer' }}
             className={[
               'h-8 rounded-lg border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60',
               placeMode
                 ? 'border-blue-600 bg-blue-600 text-white'
                 : 'border-zinc-300 bg-white text-zinc-900 hover:bg-blue-50',
             ].join(' ')}
-            title="Click anywhere on the canvas to place"
           >
             {placeMode ? 'Click to place…' : 'Add (click to place)'}
           </button>
@@ -272,13 +318,28 @@ export default function Flow() {
           <button
             onClick={addAtCenter}
             disabled={!canSubmit}
-            style={{ cursor: 'pointer' }}
             className="h-8 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Add at center
           </button>
 
-          <label className="flex items-center gap-2 text-xs text-zinc-600">
+          <button
+            onClick={deleteSelected}
+            className="h-8 rounded-lg border border-red-600 bg-red-600 px-3 text-sm text-white disabled:opacity-60"
+            disabled={selectedNodeIds.length === 0 && selectedEdgeIds.length === 0}
+          >
+            Delete selected
+          </button>
+
+          <button
+            onClick={detachSelectedNodes}
+            className="h-8 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
+            disabled={selectedNodeIds.length === 0}
+          >
+            Detach selected nodes
+          </button>
+
+          <label className="ml-1 flex items-center gap-2 text-xs text-white">
             <input
               type="checkbox"
               checked={autoConnect}
@@ -290,8 +351,7 @@ export default function Flow() {
       </div>
 
       {/* Canvas */}
-      <div className="h-[calc(100%-52px)] w-full">
-        {/* Pass your unions here so callbacks & hooks narrow correctly (docs pattern). */}
+      <div className="h-[calc(100%-56px)] w-full">
         <ReactFlow<AppNode, AppEdge>
           nodes={nodes}
           edges={edges}
@@ -299,15 +359,17 @@ export default function Flow() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
-          onPaneClick={handlePaneClick}
-          onSelectionChange={onSelectionChange}
+            onReconnect={onReconnect}            // your v12 reconnection handler
+        onPaneClick={handlePaneClick}
+        onSelectionChange={onSelectionChange} // ✅ stable handler
+        deleteKeyCode={DELETE_KEYS as unknown as string[]} // keep ref stable
           fitView
           fitViewOptions={{ padding: 0.2 }}
           defaultEdgeOptions={{ animated: true }}
           style={{ width: '100%', height: '100%' }}
         >
-          <MiniMap />
-          <Controls />
+            <MiniMap style={{ bottom: 60, right: 16 }} />
+            <Controls style={{ bottom: 60, left: 16 }} />
           <Background />
         </ReactFlow>
       </div>
