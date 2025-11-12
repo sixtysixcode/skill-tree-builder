@@ -1,3 +1,4 @@
+import { ReactFlowProvider } from '@xyflow/react';
 import Flow from "./components/Flow";
 
 export default function Home() {
@@ -7,9 +8,9 @@ export default function Home() {
         <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
           Skill Tree Builder
         </h1>
-        <div className="text-sm text-zinc-500 dark:text-zinc-700">
-        <Flow />
-        </div>
+        <ReactFlowProvider>
+          <Flow />
+        </ReactFlowProvider>
       </main>
     </div>
   );
