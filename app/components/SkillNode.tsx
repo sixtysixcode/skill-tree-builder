@@ -1,10 +1,10 @@
 // app/components/SkillNode.tsx
 'use client';
 
-import { Handle, Position, type NodeProps, type NodeTypes } from '@xyflow/react';
+import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { SkillNode } from './SkillTypes';
 
-export function SkillNodeComponent({ data }: NodeProps<SkillNode>) {
+export function SkillNodeComponent({ id, data }: NodeProps<SkillNode>) {
   const { name, description, cost, level, unlocked } = data;
 
   const base =
@@ -14,12 +14,27 @@ export function SkillNodeComponent({ data }: NodeProps<SkillNode>) {
 
   return (
     <div className={`${base} ${unlocked ? unlockedClasses : lockedClasses}`}>
+      {/* 🔘 reset button (top-right) */}
+      {unlocked && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();               // prevent node click
+            (data as any).onReset?.(id);        // call Flow callback
+          }}
+          className="absolute px-[4px] py-0 right-1 top-1 z-10 rounded-[2px] bg-red-600 min-h-[10px] min-w-[10px] line-height-1 text-[8px] text-white hover:bg-red-700"
+        >
+          ×
+        </button>
+      )}
+
       <div className="text-sm font-medium leading-tight">{name}</div>
+
       {description && (
         <div className="mt-0.5 text-[11px] leading-snug text-zinc-400">
           {description}
         </div>
       )}
+
       {(cost ?? level) !== undefined && (
         <div className="mt-1 flex flex-wrap items-center gap-1">
           {typeof cost === 'number' && (
@@ -41,6 +56,6 @@ export function SkillNodeComponent({ data }: NodeProps<SkillNode>) {
   );
 }
 
-export const nodeTypes: NodeTypes = {
+export const nodeTypes = {
   skill: SkillNodeComponent,
 };

@@ -34,7 +34,31 @@ const FIT_VIEW = { padding: 0.2 } as const;
 const DEFAULT_EDGE_OPTIONS = { animated: true } as const;
 const DELETE_KEYS = ['Delete', 'Backspace'] as const;
 
-/** ---------- Seed graph ---------- */
+const initialEdges: AppEdge[] = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
+
+function shallowEqualIds(a: string[], b: string[]) {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
+
+export default function Flow() {
+
+
+  const resetNode = useCallback((id: string) => {
+    setNodes((prev) =>
+      prev.map((n) => {
+        if (n.id !== id || n.type !== 'skill') return n;
+        return {
+          ...n,
+          data: { ...n.data, unlocked: false },
+        };
+      })
+    );
+  }, []);
+  
+  /** ---------- Seed graph ---------- */
 const initialNodes: AppNode[] = [
   {
     id: '1',
@@ -46,6 +70,7 @@ const initialNodes: AppNode[] = [
       cost: 1,
       level: 1,
       unlocked: true, // root skill starts unlocked
+      onReset: resetNode,
     },
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
@@ -58,22 +83,12 @@ const initialNodes: AppNode[] = [
       name: 'Cleave',
       description: 'Arc attack hits multiple foes',
       unlocked: false,
+      onReset: resetNode,
     },
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
   } as SkillNode,
 ];
-
-const initialEdges: AppEdge[] = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
-
-function shallowEqualIds(a: string[], b: string[]) {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
-
-export default function Flow() {
   /** Graph state */
   const [nodes, setNodes] = useState<AppNode[]>(initialNodes);
   const [edges, setEdges] = useState<AppEdge[]>(initialEdges);
@@ -138,6 +153,7 @@ export default function Flow() {
           cost: Number.isFinite(costNum as number) ? (costNum as number) : undefined,
           level: Number.isFinite(levelNum as number) ? (levelNum as number) : undefined,
           unlocked: false,
+          onReset: () => resetNode(id),
         },
         sourcePosition: Position.Right,
         targetPosition: Position.Left,

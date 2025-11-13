@@ -14,6 +14,7 @@ import type {
     level?: number;
     /** true = unlocked, false = locked */
     unlocked: boolean;
+    onReset: () => void;
   };
   
   /** Custom node type for skills */
