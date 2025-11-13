@@ -1,17 +1,14 @@
+// app/page.tsx
 import { ReactFlowProvider } from '@xyflow/react';
-import Flow from "./components/Flow";
+import Flow from './components/Flow';
 
 export default function Home() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex w-full max-w-7xl flex-col items-stretch gap-6 p-6 sm:p-12">
-        <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">
-          Skill Tree Builder
-        </h1>
-        <ReactFlowProvider>
-          <Flow />
-        </ReactFlowProvider>
-      </main>
-    </div>
+    <ReactFlowProvider>
+      {/* full viewport, no padding */}
+      <div className="h-screen w-screen overflow-hidden bg-zinc-950">
+        <Flow />
+      </div>
+    </ReactFlowProvider>
   );
 }

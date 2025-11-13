@@ -220,18 +220,17 @@ export default function Flow() {
     return true;
   }
 
-// ✅ stable, guarded selection handler
-const onSelectionChange = useCallback(
+  // ✅ stable, guarded selection handler
+  const onSelectionChange = useCallback(
     ({ nodes: ns, edges: es }: { nodes: AppNode[]; edges: AppEdge[] }) => {
       const nodeIds = ns.map((n) => n.id);
       const edgeIds = es.map((e) => e.id);
-  
+
       setSelectedNodeIds((prev) => (shallowEqualIds(prev, nodeIds) ? prev : nodeIds));
       setSelectedEdgeIds((prev) => (shallowEqualIds(prev, edgeIds) ? prev : edgeIds));
     },
     []
   );
-  
 
   /** Delete selected nodes/edges */
   const deleteSelected = useCallback(() => {
@@ -254,124 +253,137 @@ const onSelectionChange = useCallback(
 
   const canSubmit = useMemo(() => name.trim().length > 0, [name]);
 
+  /** ---------- LAYOUT ONLY CHANGES BELOW ---------- */
   return (
-    <div className="h-[82vh] w-full overflow-hidden rounded-xl border border-zinc-200 bg-white/80 text-black dark:border-zinc-800 dark:bg-zinc-900/40">
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-end gap-2 border-b border-zinc-200 text-white p-3 dark:border-zinc-800 dark:bg-zinc-900">
-        <div className="flex flex-col">
-          <label className="text-xs text-white">Name *</label>
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Skill name"
-            className="h-8 w-48 rounded border border-zinc-300 bg-white px-2 text-sm dark:bg-zinc-800"
-          />
-        </div>
+    <div className="h-full w-full overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
+      {/* Split layout: left toolbar, right canvas */}
+      <div className="flex h-full w-full">
+        {/* Left sidebar / toolbar */}
+        <aside className="flex h-full w-80 flex-col gap-4 border-r border-zinc-200 bg-zinc-900 p-4 text-white dark:border-zinc-800 dark:bg-zinc-900">
+          <h1 className="text-2xl font-bold">Skill Tree Builder</h1>
+          <h2 className="text-md font-semibold">Add Skill</h2>
 
-        <div className="flex min-w-[16rem] flex-1 flex-col">
-          <label className="text-xs text-white">Description</label>
-          <input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Optional description"
-            className="h-8 rounded border border-zinc-300 bg-white px-2 text-sm dark:bg-zinc-800"
-          />
-        </div>
+          <div className="flex flex-1 flex-col gap-3 overflow-y-auto">
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-white">Name *</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Skill name"
+                className="h-8 rounded border border-zinc-300 bg-white px-2 text-sm text-white dark:bg-zinc-800"
+              />
+            </div>
 
-        <div className="flex flex-col">
-          <label className="text-xs text-white">Cost (optional)</label>
-          <input
-            value={cost}
-            onChange={(e) => setCost(e.target.value.replace(/[^0-9]/g, ''))}
-            placeholder="e.g. 2"
-            inputMode="numeric"
-            className="h-8 w-24 rounded border border-zinc-300 bg-white px-2 text-sm dark:bg-zinc-800"
-          />
-        </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-white">Description</label>
+              <input
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Optional description"
+                className="h-8 rounded border border-zinc-300 bg-white px-2 text-sm text-white dark:bg-zinc-800"
+              />
+            </div>
 
-        <div className="flex flex-col">
-          <label className="text-xs text-white">Level (optional)</label>
-          <input
-            value={level}
-            onChange={(e) => setLevel(e.target.value.replace(/[^0-9]/g, ''))}
-            placeholder="e.g. 3"
-            inputMode="numeric"
-            className="h-8 w-24 rounded border border-zinc-300 bg-white px-2 text-sm dark:bg-zinc-800"
-          />
-        </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-white">Cost (optional)</label>
+              <input
+                value={cost}
+                onChange={(e) => setCost(e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder="e.g. 2"
+                inputMode="numeric"
+                className="h-8 w-24 rounded border border-zinc-300 bg-white px-2 text-sm text-white dark:bg-zinc-800"
+              />
+            </div>
 
-        <div className="ml-auto flex items-center gap-3">
-          {/* Blue when active */}
-          <button
-            onClick={() => setPlaceMode((v) => !v)}
-            disabled={!canSubmit && !placeMode}
-            className={[
-              'h-8 rounded-lg border px-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60',
-              placeMode
-                ? 'border-blue-600 bg-blue-600 text-white'
-                : 'border-zinc-300 bg-white text-zinc-900 hover:bg-blue-50',
-            ].join(' ')}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-white">Level (optional)</label>
+              <input
+                value={level}
+                onChange={(e) => setLevel(e.target.value.replace(/[^0-9]/g, ''))}
+                placeholder="e.g. 3"
+                inputMode="numeric"
+                className="h-8 w-24 rounded border border-zinc-300 bg-white px-2 text-sm text-white dark:bg-zinc-800"
+              />
+            </div>
+          </div>
+
+          {/* Buttons / actions at bottom of sidebar */}
+          <div className="flex flex-col gap-2 pt-2">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPlaceMode((v) => !v)}
+                disabled={!canSubmit && !placeMode}
+                className={[
+                  'min-h-10 flex-1 rounded-lg border p-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer',
+                  placeMode
+                    ? 'border-blue-600 bg-blue-600 text-white'
+                    : 'border-zinc-300 bg-white text-zinc-900 hover:bg-blue-50',
+                ].join(' ')}
+              >
+                {placeMode ? 'Click to place…' : 'Add (click to place)'}
+              </button>
+
+              <button
+                onClick={addAtCenter}
+                disabled={!canSubmit}
+                className="min-h-10 flex-1 rounded-lg border border-zinc-300 bg-white p-3 text-sm text-zinc-900 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+              >
+                Add at center
+              </button>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={deleteSelected}
+                className="min-h-10 flex-1 rounded-lg border border-red-600 bg-red-600 p-3 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer, selectedNodeIds.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed'"
+                disabled={selectedNodeIds.length === 0 && selectedEdgeIds.length === 0}
+              >
+                Delete selected
+              </button>
+
+              <button
+                onClick={detachSelectedNodes}
+                className="min-h-10 flex-1 rounded-lg border border-zinc-300 bg-white p-3 text-sm text-zinc-900 disabled:cursor-not-allowed hover:bg-zinc-50 disabled:opacity-60 cursor-pointer, selectedNodeIds.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed',"
+                disabled={selectedNodeIds.length === 0}
+              >
+                Detach selected
+              </button>
+            </div>
+
+            <label className="mt-1 flex items-center gap-2 text-xs text-white">
+              <input
+                type="checkbox"
+                checked={autoConnect}
+                onChange={(e) => setAutoConnect(e.target.checked)}
+              />
+              Auto-connect from selected
+            </label>
+          </div>
+        </aside>
+
+        {/* Right canvas */}
+        <div className="h-full flex-1">
+          <ReactFlow<AppNode, AppEdge>
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onReconnect={onReconnect}
+            onPaneClick={handlePaneClick}
+            onSelectionChange={onSelectionChange}
+            deleteKeyCode={DELETE_KEYS as unknown as string[]}
+            fitView
+            fitViewOptions={FIT_VIEW}
+            defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
+            style={{ width: '100%', height: '100%' }}
           >
-            {placeMode ? 'Click to place…' : 'Add (click to place)'}
-          </button>
-
-          <button
-            onClick={addAtCenter}
-            disabled={!canSubmit}
-            className="h-8 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Add at center
-          </button>
-
-          <button
-            onClick={deleteSelected}
-            className="h-8 rounded-lg border border-red-600 bg-red-600 px-3 text-sm text-white disabled:opacity-60"
-            disabled={selectedNodeIds.length === 0 && selectedEdgeIds.length === 0}
-          >
-            Delete selected
-          </button>
-
-          <button
-            onClick={detachSelectedNodes}
-            className="h-8 rounded-lg border border-zinc-300 bg-white px-3 text-sm text-zinc-900 hover:bg-zinc-50 disabled:opacity-60"
-            disabled={selectedNodeIds.length === 0}
-          >
-            Detach selected nodes
-          </button>
-
-          <label className="ml-1 flex items-center gap-2 text-xs text-white">
-            <input
-              type="checkbox"
-              checked={autoConnect}
-              onChange={(e) => setAutoConnect(e.target.checked)}
-            />
-            Auto-connect from selected
-          </label>
+            <MiniMap style={{ bottom: 40, right: 16 }} />
+            <Controls style={{ bottom: 40, left: 16 }} />
+            <Background />
+          </ReactFlow>
         </div>
-      </div>
-
-      {/* Canvas */}
-      <div className="h-[calc(100%-56px)] w-full">
-        <ReactFlow<AppNode, AppEdge>
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={nodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-            onReconnect={onReconnect}            // your v12 reconnection handler
-        onPaneClick={handlePaneClick}
-        onSelectionChange={onSelectionChange} // ✅ stable handler
-        deleteKeyCode={DELETE_KEYS as unknown as string[]} // keep ref stable
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
-          defaultEdgeOptions={{ animated: true }}
-          style={{ width: '100%', height: '100%' }}
-        >
-            <MiniMap style={{ bottom: 60, right: 16 }} />
-            <Controls style={{ bottom: 60, left: 16 }} />
-          <Background />
-        </ReactFlow>
       </div>
     </div>
   );
