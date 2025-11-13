@@ -270,7 +270,7 @@ export default function Flow() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Skill name"
-                className="h-8 rounded border border-zinc-300 bg-white px-2 text-sm text-white dark:bg-zinc-800"
+                className="h-8 rounded border border-zinc-300 bg-white p-2 text-sm text-white dark:bg-zinc-800"
               />
             </div>
 
@@ -280,7 +280,7 @@ export default function Flow() {
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Optional description"
-                className="h-8 rounded border border-zinc-300 bg-white px-2 text-sm text-white dark:bg-zinc-800"
+                className="h-8 rounded border border-zinc-300 bg-white p-2 text-sm text-white dark:bg-zinc-800"
               />
             </div>
 
@@ -291,7 +291,7 @@ export default function Flow() {
                 onChange={(e) => setCost(e.target.value.replace(/[^0-9]/g, ''))}
                 placeholder="e.g. 2"
                 inputMode="numeric"
-                className="h-8 w-24 rounded border border-zinc-300 bg-white px-2 text-sm text-white dark:bg-zinc-800"
+                className="h-8 w-24 rounded border border-zinc-300 bg-white p-2 text-sm text-white dark:bg-zinc-800"
               />
             </div>
 
@@ -302,7 +302,7 @@ export default function Flow() {
                 onChange={(e) => setLevel(e.target.value.replace(/[^0-9]/g, ''))}
                 placeholder="e.g. 3"
                 inputMode="numeric"
-                className="h-8 w-24 rounded border border-zinc-300 bg-white px-2 text-sm text-white dark:bg-zinc-800"
+                className="h-8 w-24 rounded border border-zinc-300 bg-white p-2 text-sm text-white dark:bg-zinc-800"
               />
             </div>
           </div>
@@ -320,7 +320,7 @@ export default function Flow() {
                     : 'border-zinc-300 bg-white text-zinc-900 hover:bg-blue-50',
                 ].join(' ')}
               >
-                {placeMode ? 'Click to place…' : 'Add (click to place)'}
+               Click to place…
               </button>
 
               <button
