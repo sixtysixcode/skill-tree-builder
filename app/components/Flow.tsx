@@ -7,78 +7,32 @@ import {
   Background,
   Controls,
   MiniMap,
-  Handle,
-  Position,
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
-  reconnectEdge,          // ✅ v12 helper
+  reconnectEdge,
   useReactFlow,
+  Position,
   type Node,
   type Edge,
   type OnEdgesChange,
   type OnNodesChange,
   type OnConnect,
-  type NodeProps,
   type BuiltInNode,
   type BuiltInEdge,
-  type NodeTypes,
-  type Connection,        // for onReconnect args
+  type Connection,
+  type NodeMouseHandler,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-/** ---------- Your data model ---------- */
-type SkillData = {
-  name: string;
-  description?: string;
-  cost?: number;
-  level?: number;
-};
+import { nodeTypes } from './SkillNode';
+import { SkillSidebar } from './SkillSidebar';
+import type { SkillData, SkillNode, AppNode, AppEdge } from './SkillTypes';
 
-/** ---------- Custom node & unions ---------- */
-type SkillNode = Node<SkillData, 'skill'>;
-type AppNode = BuiltInNode | SkillNode;
-type AppEdge = BuiltInEdge;
-
-// put these OUTSIDE the component so they don't re-create every render
+// constants
 const FIT_VIEW = { padding: 0.2 } as const;
 const DEFAULT_EDGE_OPTIONS = { animated: true } as const;
 const DELETE_KEYS = ['Delete', 'Backspace'] as const;
-
-/** ---------- Custom node component ---------- */
-function SkillNodeComponent({ data }: NodeProps<SkillNode>) {
-  const { name, description, cost, level } = data;
-
-  return (
-    <div className="relative max-w-[240px] rounded-lg border border-zinc-300 bg-white px-3 py-2 text-black shadow-sm">
-      <div className="text-sm font-medium leading-tight">{name}</div>
-      {description && (
-        <div className="mt-0.5 text-[11px] leading-snug text-zinc-600">{description}</div>
-      )}
-      {(cost ?? level) !== undefined && (
-        <div className="mt-1 flex flex-wrap items-center gap-1">
-          {typeof cost === 'number' && (
-            <span className="rounded border border-amber-200 bg-amber-100 px-1.5 py-0.5 text-[10px]">
-              Cost: {cost}
-            </span>
-          )}
-          {typeof level === 'number' && (
-            <span className="rounded border border-blue-200 bg-blue-100 px-1.5 py-0.5 text-[10px]">
-              Lv {level}
-            </span>
-          )}
-        </div>
-      )}
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
-    </div>
-  );
-}
-
-/** ---------- nodeTypes map ---------- */
-const nodeTypes: NodeTypes = {
-  skill: SkillNodeComponent,
-};
 
 /** ---------- Seed graph ---------- */
 const initialNodes: AppNode[] = [
@@ -86,7 +40,13 @@ const initialNodes: AppNode[] = [
     id: '1',
     type: 'skill',
     position: { x: 40, y: 40 },
-    data: { name: 'Slash', description: 'Basic melee attack', cost: 1, level: 1 },
+    data: {
+      name: 'Slash',
+      description: 'Basic melee attack',
+      cost: 1,
+      level: 1,
+      unlocked: true, // root skill starts unlocked
+    },
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
   } as SkillNode,
@@ -94,13 +54,24 @@ const initialNodes: AppNode[] = [
     id: '2',
     type: 'skill',
     position: { x: 280, y: 120 },
-    data: { name: 'Cleave', description: 'Arc attack hits multiple foes' },
+    data: {
+      name: 'Cleave',
+      description: 'Arc attack hits multiple foes',
+      unlocked: false,
+    },
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
   } as SkillNode,
 ];
 
 const initialEdges: AppEdge[] = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
+
+function shallowEqualIds(a: string[], b: string[]) {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
+}
 
 export default function Flow() {
   /** Graph state */
@@ -142,7 +113,7 @@ export default function Flow() {
     []
   );
 
-  /** ✅ v12 edge reconnection */
+  /** v12 edge reconnection */
   const onReconnect = useCallback(
     (oldEdge: AppEdge, newConnection: Connection) => {
       setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
@@ -150,7 +121,7 @@ export default function Flow() {
     []
   );
 
-  /** Build a new Skill node */
+  /** Build a new Skill node (new nodes start locked) */
   const buildNode = useCallback(
     (position: { x: number; y: number }): SkillNode => {
       const id = nextId();
@@ -166,6 +137,7 @@ export default function Flow() {
           description: description.trim() || undefined,
           cost: Number.isFinite(costNum as number) ? (costNum as number) : undefined,
           level: Number.isFinite(levelNum as number) ? (levelNum as number) : undefined,
+          unlocked: false,
         },
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
@@ -213,14 +185,7 @@ export default function Flow() {
     }
   }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds]);
 
-  function shallowEqualIds(a: string[], b: string[]) {
-    if (a === b) return true;
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-    return true;
-  }
-
-  // ✅ stable, guarded selection handler
+  /** Selection handler (stable) */
   const onSelectionChange = useCallback(
     ({ nodes: ns, edges: es }: { nodes: AppNode[]; edges: AppEdge[] }) => {
       const nodeIds = ns.map((n) => n.id);
@@ -230,6 +195,51 @@ export default function Flow() {
       setSelectedEdgeIds((prev) => (shallowEqualIds(prev, edgeIds) ? prev : edgeIds));
     },
     []
+  );
+
+  /** 🔓 Unlock on node click if prerequisites met */
+  const onNodeClick: NodeMouseHandler<AppNode> = useCallback(
+    (_evt, node) => {
+      if (node.type !== 'skill') return;
+
+      setNodes((prevNodes) => {
+        // find clicked node with freshest state
+        const current = prevNodes.find((n) => n.id === node.id && n.type === 'skill') as
+          | SkillNode
+          | undefined;
+        if (!current || current.data.unlocked) {
+          return prevNodes;
+        }
+
+        // all nodes that point INTO this node
+        const incoming = edges.filter((e) => e.target === node.id);
+        const prereqIds = incoming.map((e) => e.source);
+
+        const prerequisitesMet =
+          prereqIds.length === 0 ||
+          prereqIds.every((pid) => {
+            const prereq = prevNodes.find((n) => n.id === pid && n.type === 'skill') as
+              | SkillNode
+              | undefined;
+            return prereq?.data.unlocked;
+          });
+
+        if (!prerequisitesMet) {
+          return prevNodes;
+        }
+
+        // mark clicked node unlocked
+        return prevNodes.map((n) => {
+          if (n.id !== node.id || n.type !== 'skill') return n;
+          const skill = n as SkillNode;
+          return {
+            ...skill,
+            data: { ...skill.data, unlocked: true },
+          };
+        });
+      });
+    },
+    [edges]
   );
 
   /** Delete selected nodes/edges */
@@ -253,113 +263,31 @@ export default function Flow() {
 
   const canSubmit = useMemo(() => name.trim().length > 0, [name]);
 
-  /** ---------- LAYOUT ONLY CHANGES BELOW ---------- */
+  /** ---------- Layout ---------- */
   return (
     <div className="h-full w-full overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
-      {/* Split layout: left toolbar, right canvas */}
       <div className="flex h-full w-full">
-        {/* Left sidebar / toolbar */}
-        <aside className="flex h-full w-80 flex-col gap-4 border-r border-zinc-200 bg-zinc-900 p-4 text-white dark:border-zinc-800 dark:bg-zinc-900">
-          <h1 className="text-2xl font-bold">Skill Tree Builder</h1>
-          <h2 className="text-md font-semibold">Add Skill</h2>
-
-          <div className="flex flex-1 flex-col gap-3 overflow-y-auto">
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-white">Name *</label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Skill name"
-                className="h-8 rounded border border-zinc-300 bg-white p-2 text-sm text-white dark:bg-zinc-800"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-white">Description</label>
-              <input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Optional description"
-                className="h-8 rounded border border-zinc-300 bg-white p-2 text-sm text-white dark:bg-zinc-800"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-white">Cost (optional)</label>
-              <input
-                value={cost}
-                onChange={(e) => setCost(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="e.g. 2"
-                inputMode="numeric"
-                className="h-8 w-24 rounded border border-zinc-300 bg-white p-2 text-sm text-white dark:bg-zinc-800"
-              />
-            </div>
-
-            <div className="flex flex-col gap-1">
-              <label className="text-xs text-white">Level (optional)</label>
-              <input
-                value={level}
-                onChange={(e) => setLevel(e.target.value.replace(/[^0-9]/g, ''))}
-                placeholder="e.g. 3"
-                inputMode="numeric"
-                className="h-8 w-24 rounded border border-zinc-300 bg-white p-2 text-sm text-white dark:bg-zinc-800"
-              />
-            </div>
-          </div>
-
-          {/* Buttons / actions at bottom of sidebar */}
-          <div className="flex flex-col gap-2 pt-2">
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPlaceMode((v) => !v)}
-                disabled={!canSubmit && !placeMode}
-                className={[
-                  'min-h-10 flex-1 rounded-lg border p-3 text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer',
-                  placeMode
-                    ? 'border-blue-600 bg-blue-600 text-white'
-                    : 'border-zinc-300 bg-white text-zinc-900 hover:bg-blue-50',
-                ].join(' ')}
-              >
-               Click to place…
-              </button>
-
-              <button
-                onClick={addAtCenter}
-                disabled={!canSubmit}
-                className="min-h-10 flex-1 rounded-lg border border-zinc-300 bg-white p-3 text-sm text-zinc-900 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
-              >
-                Add at center
-              </button>
-            </div>
-
-            <div className="flex gap-2">
-              <button
-                onClick={deleteSelected}
-                className="min-h-10 flex-1 rounded-lg border border-red-600 bg-red-600 p-3 text-sm text-white disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer, selectedNodeIds.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed'"
-                disabled={selectedNodeIds.length === 0 && selectedEdgeIds.length === 0}
-              >
-                Delete selected
-              </button>
-
-              <button
-                onClick={detachSelectedNodes}
-                className="min-h-10 flex-1 rounded-lg border border-zinc-300 bg-white p-3 text-sm text-zinc-900 disabled:cursor-not-allowed hover:bg-zinc-50 disabled:opacity-60 cursor-pointer, selectedNodeIds.length > 0 ? 'cursor-pointer' : 'cursor-not-allowed',"
-                disabled={selectedNodeIds.length === 0}
-              >
-                Detach selected
-              </button>
-            </div>
-
-            <label className="mt-1 flex items-center gap-2 text-xs text-white">
-              <input
-                type="checkbox"
-                checked={autoConnect}
-                onChange={(e) => setAutoConnect(e.target.checked)}
-              />
-              Auto-connect from selected
-            </label>
-          </div>
-        </aside>
+        {/* Left toolbar */}
+        <SkillSidebar
+          name={name}
+          description={description}
+          cost={cost}
+          level={level}
+          placeMode={placeMode}
+          autoConnect={autoConnect}
+          canSubmit={canSubmit}
+          hasSelection={selectedNodeIds.length > 0 || selectedEdgeIds.length > 0}
+          hasSelectedNodes={selectedNodeIds.length > 0}
+          onNameChange={setName}
+          onDescriptionChange={setDescription}
+          onCostChange={(v) => setCost(v.replace(/[^0-9]/g, ''))}
+          onLevelChange={(v) => setLevel(v.replace(/[^0-9]/g, ''))}
+          onTogglePlaceMode={() => setPlaceMode((v) => !v)}
+          onAddAtCenter={addAtCenter}
+          onDeleteSelected={deleteSelected}
+          onDetachSelected={detachSelectedNodes}
+          onToggleAutoConnect={setAutoConnect}
+        />
 
         {/* Right canvas */}
         <div className="h-full flex-1">
@@ -373,14 +301,15 @@ export default function Flow() {
             onReconnect={onReconnect}
             onPaneClick={handlePaneClick}
             onSelectionChange={onSelectionChange}
+            onNodeClick={onNodeClick}
             deleteKeyCode={DELETE_KEYS as unknown as string[]}
             fitView
             fitViewOptions={FIT_VIEW}
             defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
             style={{ width: '100%', height: '100%' }}
           >
-            <MiniMap style={{ bottom: 40, right: 16 }} />
-            <Controls style={{ bottom: 40, left: 16 }} />
+            <MiniMap style={{ bottom: 60, right: 16 }} />
+            <Controls style={{ bottom: 60, left: 16 }} />
             <Background />
           </ReactFlow>
         </div>
