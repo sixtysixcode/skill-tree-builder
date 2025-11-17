@@ -32,8 +32,8 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
             onReset?.();
           }}
           className="
-            absolute top-1 right-1 text-[8px] px-0.5 py-0
-            bg-red-600 text-white rounded-[2px] shadow
+            absolute top-1 right-1 text-[8px] p-1
+            bg-red-600 text-white rounded-[2px] shadow leading-none
           "
         >
           Reset

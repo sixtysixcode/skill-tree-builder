@@ -65,6 +65,7 @@ export function SkillSidebar({
         }}
         className="flex flex-col gap-4"
       >
+        <h1 className="text-2xl">Skill Tree Builder</h1>
         {/* Each input animated */}
         <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
           <label className="text-xs text-white">Name *</label>
