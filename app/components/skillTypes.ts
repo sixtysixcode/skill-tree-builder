@@ -1,4 +1,3 @@
-// app/components/skillTypes.ts
 import type {
     Node,
     Edge,

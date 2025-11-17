@@ -1,4 +1,3 @@
-// app/page.tsx
 import { ReactFlowProvider } from '@xyflow/react';
 import Flow from './components/Flow';
 

@@ -1,4 +1,3 @@
-// app/components/SkillNode.tsx
 'use client';
 
 import { motion } from 'framer-motion';
@@ -19,7 +18,7 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
       }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
       className={`
-        relative max-w-[240px] rounded-lg border px-3 py-2 shadow-sm
+        relative max-w-[240px] rounded-lg border-3 px-3 py-2 shadow-sm
         text-black
         ${unlocked ? 'bg-white border-green-400' : 'bg-zinc-200 border-zinc-400 opacity-70'}
       `}
