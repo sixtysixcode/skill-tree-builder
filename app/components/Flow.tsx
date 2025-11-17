@@ -23,6 +23,9 @@ import '@xyflow/react/dist/style.css';
 
 import { motion } from 'framer-motion';
 
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+
 import { nodeTypes } from './SkillNode';
 import { SkillSidebar } from './SkillSidebar';
 import type { SkillNode, SkillData, AppNode, AppEdge } from './skillTypes';
@@ -33,6 +36,9 @@ const DEFAULT_EDGE_OPTIONS = { animated: true } as const;
 const DELETE_KEYS = ['Delete', 'Backspace'] as const;
 
 const initialEdges: AppEdge[] = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
+const CYCLE_ERROR_MESSAGE = 'Circular skill connections are not allowed.';
+
+type EdgeConnection = Connection & Partial<Pick<AppEdge, 'id' | 'animated'>>;
 
 // Small helper so TS knows when we have a SkillNode
 function isSkillNode(node: AppNode): node is SkillNode {
@@ -145,10 +151,64 @@ export default function Flow() {
     [],
   );
 
+  const wouldCreateCycle = useCallback(
+    (sourceId?: string | null, targetId?: string | null) => {
+      if (!sourceId || !targetId) return false;
+      if (sourceId === targetId) return true;
+
+      const adjacency = new Map<string, string[]>();
+      edges.forEach(({ source, target }) => {
+        if (!source || !target) return;
+        const list = adjacency.get(source);
+        if (list) {
+          list.push(target);
+        } else {
+          adjacency.set(source, [target]);
+        }
+      });
+
+      const stack = [targetId];
+      const visited = new Set<string>();
+
+      while (stack.length > 0) {
+        const current = stack.pop();
+        if (!current || visited.has(current)) continue;
+        if (current === sourceId) return true;
+        visited.add(current);
+        const next = adjacency.get(current);
+        if (next) stack.push(...next);
+      }
+
+      return false;
+    },
+    [edges],
+  );
+
+  const addEdgeSafely = useCallback(
+    (connection: EdgeConnection) => {
+      if (connection.source && connection.target && wouldCreateCycle(connection.source, connection.target)) {
+        toast.error(CYCLE_ERROR_MESSAGE, { autoClose: 3200 });
+        return false;
+      }
+      setEdges((eds) =>
+        addEdge<AppEdge>(
+          {
+            animated: true,
+            ...connection,
+          },
+          eds,
+        ),
+      );
+      return true;
+    },
+    [wouldCreateCycle],
+  );
+
   const onConnect: OnConnect = useCallback(
-    (connection) =>
-      setEdges((eds) => addEdge<AppEdge>({ ...connection, animated: true }, eds)),
-    [],
+    (connection) => {
+      addEdgeSafely(connection);
+    },
+    [addEdgeSafely],
   );
 
   const onReconnect = useCallback(
@@ -207,16 +267,18 @@ export default function Flow() {
 
       if (autoConnect && selectedNodeIds[0]) {
         const from = selectedNodeIds[0];
-        setEdges((eds) =>
-          addEdge<AppEdge>(
-            { id: `e${from}-${node.id}`, source: from, target: node.id, animated: true },
-            eds,
-          ),
-        );
+        addEdgeSafely({
+          id: `e${from}-${node.id}`,
+          source: from,
+          sourceHandle: null,
+          target: node.id,
+          targetHandle: null,
+          animated: true,
+        });
       }
       setPlaceMode(false);
     },
-    [placeMode, screenToFlowPosition, buildNode, autoConnect, selectedNodeIds],
+    [placeMode, screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely],
   );
 
   /** Add at center */
@@ -237,14 +299,16 @@ export default function Flow() {
 
     if (autoConnect && selectedNodeIds[0]) {
       const from = selectedNodeIds[0];
-      setEdges((eds) =>
-        addEdge<AppEdge>(
-          { id: `e${from}-${node.id}`, source: from, target: node.id, animated: true },
-          eds,
-        ),
-      );
+      addEdgeSafely({
+        id: `e${from}-${node.id}`,
+        source: from,
+        sourceHandle: null,
+        target: node.id,
+        targetHandle: null,
+        animated: true,
+      });
     }
-  }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds]);
+  }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely]);
 
   /** Selection handler (typed) */
   const onSelectionChange = useCallback(
@@ -433,6 +497,7 @@ export default function Flow() {
           </ReactFlow>
         </div>
       </div>
+      <ToastContainer position="bottom-right" autoClose={3200} pauseOnHover closeOnClick theme="dark" />
     </div>
   );
 }
