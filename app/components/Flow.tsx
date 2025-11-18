@@ -176,6 +176,14 @@ export default function Flow({ treeId }: FlowProps) {
   const clientId = useMemo(() => generateId(), []);
   const userColor = useMemo(() => CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)], []);
   const displayName = useMemo(() => `User ${clientId.slice(-4)}`, [clientId]);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const shareLink = typeof window !== 'undefined' ? `${window.location.origin}/tree/${treeId}` : '';
 
@@ -249,13 +257,13 @@ export default function Flow({ treeId }: FlowProps) {
   );
 
   const broadcastAction = useCallback(
-    (message: string) => {
+    (message: string, options?: { refetch?: boolean }) => {
       const channel = presenceChannelRef.current;
       if (!channel) return;
       channel.send({
         type: 'broadcast',
         event: 'action',
-        payload: { id: clientId, message },
+        payload: { id: clientId, message, refetch: options?.refetch ?? false },
       });
     },
     [clientId],
@@ -281,9 +289,168 @@ export default function Flow({ treeId }: FlowProps) {
     }
   };
 
+   /** Reset a node to locked */
+   const resetNode = useCallback(
+    (id: string, options?: { silent?: boolean; reason?: string }) => {
+      let changed = false;
+      let nodeName: string | undefined;
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (!isSkillNode(n) || n.id !== id) return n;
+          const data = n.data as SkillData;
+          if (!data.unlocked) return n;
+          changed = true;
+          nodeName = data.name;
+          return {
+            ...n,
+            data: { ...data, unlocked: false },
+          } as SkillNode;
+        }),
+      );
+      if (!changed) return;
+      void supabase.from('skill_nodes').update({ unlocked: false }).eq('id', id);
+      if (!options?.silent) {
+        broadcastAction(options?.reason ?? `Locked "${nodeName ?? 'Skill'}"`);
+      }
+    },
+    [setNodes, broadcastAction],
+  );
+
+  const lockNodeIfPrereqsMissing = useCallback(
+    (nodeId: string, incomingOverride?: Array<{ source: string }>) => {
+      const node = nodes.find((n): n is SkillNode => isSkillNode(n) && n.id === nodeId);
+      if (!node) return;
+      const data = node.data as SkillData;
+      if (!data.unlocked) return;
+      const incoming =
+        incomingOverride ??
+        edges.filter((edge) => edge.target === nodeId).map((edge) => ({ source: edge.source }));
+      if (incoming.length === 0) return;
+      const prerequisitesMet = incoming.every((edge) => {
+        const prereq = nodes.find((n): n is SkillNode => isSkillNode(n) && n.id === edge.source);
+        return prereq ? (prereq.data as SkillData).unlocked : false;
+      });
+      if (!prerequisitesMet) {
+        resetNode(nodeId, { silent: true });
+      }
+    },
+    [nodes, edges, resetNode],
+  );
+
   useEffect(() => {
     setHasExistingTree(nodes.length > 0 || edges.length > 0);
   }, [nodes, edges]);
+
+  useEffect(() => {
+    const channel = supabase.channel(`tree-updates:${treeId}`, {
+      config: { broadcast: { ack: false } },
+    });
+    changeChannelRef.current = channel;
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_nodes', filter: `tree_id=eq.${treeId}` }, (payload) => {
+        if (payload.eventType === 'INSERT' && payload.new) {
+          setNodes((prev) => {
+            if (prev.some((n) => n.id === payload.new.id)) return prev;
+            return prev.concat(mapNodeRow(payload.new as SkillNodeRow));
+          });
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          setNodes((prev) =>
+            prev.map((node) => (node.id === payload.new.id ? mapNodeRow(payload.new as SkillNodeRow) : node)),
+          );
+        } else if (payload.eventType === 'DELETE' && payload.old) {
+          setNodes((prev) => prev.filter((node) => node.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_edges', filter: `tree_id=eq.${treeId}` }, (payload) => {
+        if (payload.eventType === 'INSERT' && payload.new) {
+          let nextEdges: AppEdge[] = [];
+          setEdges((prev) => {
+            if (prev.some((edge) => edge.id === payload.new.id)) {
+              nextEdges = prev;
+              return prev;
+            }
+            nextEdges = prev.concat(mapEdgeRow(payload.new as SkillEdgeRow));
+            return nextEdges;
+          });
+          const targetId = (payload.new as SkillEdgeRow).target;
+          if (targetId) {
+            const incomingForTarget = nextEdges
+              .filter((edge) => edge.target === targetId)
+              .map((edge) => ({ source: edge.source }));
+            lockNodeIfPrereqsMissing(targetId, incomingForTarget);
+          }
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          setEdges((prev) =>
+            prev.map((edge) => (edge.id === payload.new.id ? mapEdgeRow(payload.new as SkillEdgeRow) : edge)),
+          );
+        } else if (payload.eventType === 'DELETE' && payload.old) {
+          setEdges((prev) => prev.filter((edge) => edge.id !== payload.old.id));
+        }
+      });
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      changeChannelRef.current = null;
+    };
+  }, [treeId, lockNodeIfPrereqsMissing]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const now = Date.now();
+      setRemoteCursors((prev) => {
+        let changed = false;
+        const next: Record<string, RemoteCursor> = {};
+        Object.values(prev).forEach((cursor) => {
+          if (now - cursor.lastUpdated <= 5000) {
+            next[cursor.id] = cursor;
+          } else {
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }, 4000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  const fetchTreeData = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const silent = options?.silent ?? false;
+      if (!silent) setTreeLoading(true);
+      setTreeError(null);
+      const [nodesResult, edgesResult, treeResult] = await Promise.all([
+        supabase.from('skill_nodes').select('*').eq('tree_id', treeId),
+        supabase.from('skill_edges').select('*').eq('tree_id', treeId),
+        supabase.from('trees').select('title,password_hash').eq('id', treeId).single(),
+      ]);
+      if (!isMountedRef.current) return;
+      if (treeResult.error) {
+        setTreeError(treeResult.error.message);
+        if (!silent) setTreeLoading(false);
+        return;
+      }
+      setTreeTitle(treeResult.data?.title ?? 'Skill Tree');
+      setHasTreePassword(Boolean(treeResult.data?.password_hash));
+      if (nodesResult.error || edgesResult.error) {
+        setTreeError(nodesResult.error?.message ?? edgesResult.error?.message ?? 'Failed to load tree');
+        if (!silent) setTreeLoading(false);
+        return;
+      }
+      const mappedNodes = (nodesResult.data as SkillNodeRow[]).map(mapNodeRow);
+      const mappedEdges = (edgesResult.data as SkillEdgeRow[]).map(mapEdgeRow);
+      setNodes(mappedNodes);
+      setEdges(mappedEdges);
+      setHasExistingTree(mappedNodes.length > 0 || mappedEdges.length > 0);
+      if (!silent) setTreeLoading(false);
+    },
+    [treeId],
+  );
+
+  useEffect(() => {
+    fetchTreeData();
+  }, [fetchTreeData]);
 
   useEffect(() => {
     const channel = supabase.channel(`tree-presence:${treeId}`, {
@@ -324,7 +491,7 @@ export default function Flow({ treeId }: FlowProps) {
         });
       })
       .on('broadcast', { event: 'cursor-move' }, ({ payload }) => {
-      if (!payload || payload.id === clientId) return;
+        if (!payload || payload.id === clientId) return;
         if (payload.hidden) {
           setRemoteCursors((prev) => {
             const next = { ...prev };
@@ -334,12 +501,13 @@ export default function Flow({ treeId }: FlowProps) {
           return;
         }
         setRemoteCursors((prev) => {
-          const existing = prev[payload.id] ?? {
-            id: payload.id,
-            color: payload.color ?? '#f97316',
-            label: payload.name ?? `User ${payload.id.slice(-4)}`,
-            lastUpdated: Date.now(),
-          } as RemoteCursor;
+          const existing: RemoteCursor =
+            prev[payload.id] ?? {
+              id: payload.id,
+              color: payload.color ?? '#f97316',
+              label: payload.name ?? `User ${payload.id.slice(-4)}`,
+              lastUpdated: Date.now(),
+            };
           return {
             ...prev,
             [payload.id]: {
@@ -352,16 +520,6 @@ export default function Flow({ treeId }: FlowProps) {
           };
         });
       })
-      .on('broadcast', { event: 'node-position' }, ({ payload }) => {
-        if (!payload || payload.id === clientId) return;
-        const { nodeId, position } = payload;
-        if (!nodeId || !position) return;
-        setNodes((prev) =>
-          prev.map((node) =>
-            node.id === nodeId ? { ...node, position } : node,
-          ),
-        );
-      })
       .on('broadcast', { event: 'action' }, ({ payload }) => {
         if (!payload || payload.id === clientId) return;
         setRemoteCursors((prev) => {
@@ -372,6 +530,17 @@ export default function Flow({ treeId }: FlowProps) {
             [payload.id]: { ...existing, action: payload.message, lastUpdated: Date.now() },
           };
         });
+        if (payload.refetch) {
+          fetchTreeData({ silent: true });
+        }
+      })
+      .on('broadcast', { event: 'node-position' }, ({ payload }) => {
+        if (!payload || payload.id === clientId) return;
+        const { nodeId, position } = payload;
+        if (!nodeId || !position) return;
+        setNodes((prev) =>
+          prev.map((node) => (node.id === nodeId ? { ...node, position } : node)),
+        );
       });
 
     channel.subscribe((status) => {
@@ -385,121 +554,7 @@ export default function Flow({ treeId }: FlowProps) {
       presenceChannelRef.current = null;
       setRemoteCursors({});
     };
-  }, [treeId, clientId, displayName, userColor]);
-
-  useEffect(() => {
-    const channel = supabase.channel(`tree-updates:${treeId}`, {
-      config: { broadcast: { ack: false } },
-    });
-    changeChannelRef.current = channel;
-    channel
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_nodes', filter: `tree_id=eq.${treeId}` }, (payload) => {
-        if (payload.eventType === 'INSERT' && payload.new) {
-          setNodes((prev) => {
-            if (prev.some((n) => n.id === payload.new.id)) return prev;
-            return prev.concat(mapNodeRow(payload.new as SkillNodeRow));
-          });
-        } else if (payload.eventType === 'UPDATE' && payload.new) {
-          setNodes((prev) =>
-            prev.map((node) => (node.id === payload.new.id ? mapNodeRow(payload.new as SkillNodeRow) : node)),
-          );
-        } else if (payload.eventType === 'DELETE' && payload.old) {
-          setNodes((prev) => prev.filter((node) => node.id !== payload.old.id));
-        }
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_edges', filter: `tree_id=eq.${treeId}` }, (payload) => {
-        if (payload.eventType === 'INSERT' && payload.new) {
-          setEdges((prev) => {
-            if (prev.some((edge) => edge.id === payload.new.id)) return prev;
-            return prev.concat(mapEdgeRow(payload.new as SkillEdgeRow));
-          });
-        } else if (payload.eventType === 'UPDATE' && payload.new) {
-          setEdges((prev) =>
-            prev.map((edge) => (edge.id === payload.new.id ? mapEdgeRow(payload.new as SkillEdgeRow) : edge)),
-          );
-        } else if (payload.eventType === 'DELETE' && payload.old) {
-          setEdges((prev) => prev.filter((edge) => edge.id !== payload.old.id));
-        }
-      });
-
-    channel.subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-      changeChannelRef.current = null;
-    };
-  }, [treeId]);
-
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      const now = Date.now();
-      setRemoteCursors((prev) => {
-        let changed = false;
-        const next: Record<string, RemoteCursor> = {};
-        Object.values(prev).forEach((cursor) => {
-          if (now - cursor.lastUpdated <= 5000) {
-            next[cursor.id] = cursor;
-          } else {
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
-    }, 4000);
-    return () => window.clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    setTreeLoading(true);
-    setTreeError(null);
-    const load = async () => {
-      const [nodesResult, edgesResult, treeResult] = await Promise.all([
-        supabase.from('skill_nodes').select('*').eq('tree_id', treeId),
-        supabase.from('skill_edges').select('*').eq('tree_id', treeId),
-        supabase.from('trees').select('title,password_hash').eq('id', treeId).single(),
-      ]);
-      if (!active) return;
-      if (treeResult.error) {
-        setTreeError(treeResult.error.message);
-        setTreeLoading(false);
-        return;
-      }
-      setTreeTitle(treeResult.data?.title ?? 'Skill Tree');
-      setHasTreePassword(Boolean(treeResult.data?.password_hash));
-      if (nodesResult.error || edgesResult.error) {
-        setTreeError(nodesResult.error?.message ?? edgesResult.error?.message ?? 'Failed to load tree');
-        setTreeLoading(false);
-        return;
-      }
-      const mappedNodes = (nodesResult.data as SkillNodeRow[]).map(mapNodeRow);
-      const mappedEdges = (edgesResult.data as SkillEdgeRow[]).map(mapEdgeRow);
-      setNodes(mappedNodes);
-      setEdges(mappedEdges);
-      setHasExistingTree(mappedNodes.length > 0 || mappedEdges.length > 0);
-      setTreeLoading(false);
-    };
-    load();
-    return () => {
-      active = false;
-    };
-  }, [treeId]);
-
-  /** Reset a node to locked */
-  const resetNode = useCallback(
-    (id: string) => {
-      setNodes((prev) =>
-        prev.map((n) => {
-          if (!isSkillNode(n) || n.id !== id) return n;
-          return {
-            ...n,
-            data: { ...(n.data as SkillData), unlocked: false },
-          } as SkillNode;
-        }),
-      );
-    },
-    [setNodes],
-  );
+  }, [treeId, clientId, displayName, userColor, fetchTreeData]);
 
   const searchInfo = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -688,16 +743,25 @@ export default function Flow({ treeId }: FlowProps) {
         return false;
       }
       const id = connection.id ?? generateId();
-      setEdges((eds) =>
-        addEdge<AppEdge>(
+      let latestEdges: AppEdge[] = [];
+      setEdges((eds) => {
+        const next = addEdge<AppEdge>(
           {
             animated: true,
             ...connection,
             id,
           },
           eds,
-        ),
-      );
+        );
+        latestEdges = next;
+        return next;
+      });
+      if (connection.target) {
+        const incomingForTarget = latestEdges
+          .filter((edge) => edge.target === connection.target)
+          .map((edge) => ({ source: edge.source }));
+        lockNodeIfPrereqsMissing(connection.target, incomingForTarget);
+      }
       void supabase
         .from('skill_edges')
         .insert({
@@ -716,7 +780,7 @@ export default function Flow({ treeId }: FlowProps) {
         });
       return true;
     },
-    [wouldCreateCycle, treeId, broadcastAction],
+    [wouldCreateCycle, treeId, broadcastAction, lockNodeIfPrereqsMissing],
   );
 
   const onConnect: OnConnect = useCallback(
@@ -1012,7 +1076,7 @@ export default function Flow({ treeId }: FlowProps) {
       void supabase.from('skill_edges').delete().in('id', edgeIds);
     }
     if (nodesToDelete.length > 0 || edgesToDelete.length > 0) {
-      broadcastAction('Deleted selection');
+      broadcastAction('Deleted selection', { refetch: true });
     }
   }, [deleteElements, nodes, edges, selectedNodeIds, selectedEdgeIds, broadcastAction]);
 
@@ -1066,7 +1130,7 @@ export default function Flow({ treeId }: FlowProps) {
           })),
         );
       }
-      broadcastAction('Reset tree to default nodes');
+      broadcastAction('Reset tree to default nodes', { refetch: true });
     } catch {
       toast.error('Failed to reset tree');
     } finally {
