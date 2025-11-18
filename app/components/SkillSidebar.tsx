@@ -84,7 +84,7 @@ export function SkillSidebar({
         </div>
         {/* Each input animated */}
         <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
-          <label className="text-xs text-white">Name *</label>
+          <label className="text-sm text-white">Name *</label>
           <input
             value={name}
             onChange={(e) => onNameChange(e.target.value)}
@@ -94,17 +94,17 @@ export function SkillSidebar({
         </motion.div>
 
         <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
-          <label className="text-xs text-white">Description</label>
+          <label className="text-sm text-white">Description *</label>
           <input
             value={description}
             onChange={(e) => onDescriptionChange(e.target.value)}
-            placeholder="Optional description"
+            placeholder="Description"
             className="h-8 w-full rounded border border-zinc-300 bg-white/10 px-2 text-sm placeholder-white"
           />
         </motion.div>
 
         <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
-          <label className="text-xs text-white">Cost</label>
+          <label className="text-sm text-white">Cost</label>
           <input
             value={cost}
             onChange={(e) => onCostChange(e.target.value)}
@@ -115,7 +115,7 @@ export function SkillSidebar({
         </motion.div>
 
         <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
-          <label className="text-xs text-white">Level</label>
+          <label className="text-sm text-white">Level</label>
           <input
             value={level}
             onChange={(e) => onLevelChange(e.target.value)}
@@ -123,19 +123,6 @@ export function SkillSidebar({
             inputMode="numeric"
             className="h-8 w-full rounded border border-zinc-300 bg-white/10 px-2 text-sm placeholder-white"
           />
-        </motion.div>
-
-        <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
-          <label className="text-xs text-white">Search</label>
-          <input
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Find skill by name or description"
-            className="h-8 w-full rounded border border-amber-200 bg-white/5 px-2 text-sm placeholder-white/70 focus:border-amber-300 focus:outline-none"
-          />
-          <p className="mt-1 text-[11px] text-white/60">
-            Highlights matching skills and their prerequisite paths.
-          </p>
         </motion.div>
 
         {/* Buttons */}
@@ -181,7 +168,7 @@ export function SkillSidebar({
 
         <motion.label
           variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}
-          className="flex items-center gap-2 text-xs text-white"
+          className="flex items-center gap-2 text-sm text-white"
         >
           <input
             type="checkbox"
@@ -191,6 +178,21 @@ export function SkillSidebar({
           Auto-connect from selected
         </motion.label>
       </motion.div>
+
+      <div className="my-4 border-t border-white/30" />
+
+      <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
+          <label className="text-md text-white">Search</label>
+          <input
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Find skill by name or description"
+            className="h-8 w-full rounded border border-amber-200 bg-white/5 px-2 text-sm placeholder-white/70 focus:border-amber-300 focus:outline-none"
+          />
+          <p className="mt-1 text-[11px] text-white/60">
+            Highlights matching skills and their prerequisite paths.
+          </p>
+        </motion.div>
     </motion.div>
   );
 }

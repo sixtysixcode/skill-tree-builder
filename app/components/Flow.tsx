@@ -590,7 +590,7 @@ export default function Flow() {
     );
   }, [selectedNodeIds]);
 
-  const canSubmit = useMemo(() => name.trim().length > 0, [name]);
+  const canSubmit = useMemo(() => name.trim().length > 0 && description.trim().length > 0, [name, description]);
 
   const closeSidebarForMobile = () => {
     if (window.innerWidth <= 768) setSidebarOpen(false);
