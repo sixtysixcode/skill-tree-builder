@@ -30,67 +30,16 @@ import { SkillSidebar } from './SkillSidebar';
 import { Splash } from './Splash';
 import { EditNodeModal } from './EditNodeModal';
 import { useLocalStorage } from '../hooks/useLocalStorage';
-import type { SkillNode, SkillData, AppNode, AppEdge } from './skillTypes';
-
-// constants
-const FIT_VIEW = { padding: 0.2 } as const;
-const DEFAULT_EDGE_OPTIONS = { animated: true } as const;
-const DELETE_KEYS = ['Delete', 'Backspace'] as const;
-
-const DEFAULT_NODE_STYLE = { width: 260, minHeight: 120 } as const;
-
-const initialNodes: AppNode[] = [
-  {
-    id: '1',
-    type: 'skill',
-    position: { x: 40, y: 40 },
-    data: {
-      name: 'HTML',
-      description: 'HyperText Markup Language',
-      cost: 1,
-      level: 1,
-      unlocked: true,
-    } as SkillData,
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-    style: { ...DEFAULT_NODE_STYLE },
-  } as SkillNode,
-  {
-    id: '2',
-    type: 'skill',
-    position: { x: 280, y: 120 },
-    data: {
-      name: 'CSS',
-      description: 'Cascading Style Sheets',
-      unlocked: false,
-    } as SkillData,
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-    style: { ...DEFAULT_NODE_STYLE },
-  } as SkillNode,
-];
-
-const initialEdges: AppEdge[] = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
-const CYCLE_ERROR_MESSAGE = 'Circular skill connections are not allowed.';
+import type { SkillNode, SkillData, AppNode, AppEdge } from '../types/skillTypes';
+import { shallowEqual } from '../utils/helpers';
+import { isSkillNode } from '../utils/helpers';
+import { CYCLE_ERROR_MESSAGE, DEFAULT_EDGE_OPTIONS, DEFAULT_NODE_STYLE, DELETE_KEYS, initialEdges, initialNodes } from '../constants/canvasConstants';
 
 type EdgeConnection = Connection & Partial<Pick<AppEdge, 'id' | 'animated'>>;
-
-// Small helper so TS knows when we have a SkillNode
-function isSkillNode(node: AppNode): node is SkillNode {
-  return node.type === 'skill';
-}
-
-function shallowEqualIds(a: string[], b: string[]) {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
-  return true;
-}
 
 export default function Flow() {
   /** ---------- Seed graph ---------- */
   const [nodes, setNodes, hadStoredNodes, nodesInitialized] = useLocalStorage<AppNode[]>('skill-tree-nodes', initialNodes);
-
   const [edges, setEdges, hadStoredEdges, edgesInitialized] = useLocalStorage<AppEdge[]>('skill-tree-edges', initialEdges);
 
   /** Form / UX */
@@ -116,21 +65,24 @@ export default function Flow() {
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
 
-  /** ID source */
+  /** ID source for nodes */
   const idRef = useRef(3);
   const nextId = () => String(idRef.current++);
 
+  /** Ensure all node IDs are always unique */
   useEffect(() => {
+    // Find the largest ID
     const maxId = nodes.reduce((max, node) => {
       const numericId = Number(node.id);
       return Number.isFinite(numericId) ? Math.max(max, numericId) : max;
     }, 0);
+    // Set current IdRef to largest existing ID + 1
     if (maxId + 1 > idRef.current) {
       idRef.current = maxId + 1;
     }
   }, [nodes]);
 
-  /** Instance (typed with your unions) */
+  /** Instance (typed with unions) - to place nodes in the correct coordinates on the canvas and delete nodes */
   const { screenToFlowPosition, deleteElements } = useReactFlow<AppNode, AppEdge>();
 
   /** Reset a node to locked */
@@ -157,6 +109,7 @@ export default function Flow() {
       };
     }
 
+    /** Find nodes with name/description that matches the search query */
     const matchedNodeIds = new Set<string>();
     nodes.forEach((node) => {
       if (!isSkillNode(node)) return;
@@ -519,8 +472,8 @@ export default function Flow() {
       const nodeIds = ns.map((n) => n.id);
       const edgeIds = es.map((e) => e.id);
 
-      setSelectedNodeIds((prev) => (shallowEqualIds(prev, nodeIds) ? prev : nodeIds));
-      setSelectedEdgeIds((prev) => (shallowEqualIds(prev, edgeIds) ? prev : edgeIds));
+      setSelectedNodeIds((prev) => (shallowEqual(prev, nodeIds) ? prev : nodeIds));
+      setSelectedEdgeIds((prev) => (shallowEqual(prev, edgeIds) ? prev : edgeIds));
     },
     [],
   );
@@ -632,6 +585,7 @@ export default function Flow() {
     });
   }, [resetNode, startEditNode, setNodes]);
 
+  /** Automatically re-open the sidebar when the screen expands past 768px */
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) {
@@ -643,6 +597,7 @@ export default function Flow() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  /** Ensure the app has hydrated before rendering the splash to prevent UI mismatches on render */
   useEffect(() => {
     setHasHydrated(true);
   }, []);
@@ -742,7 +697,7 @@ export default function Flow() {
             onNodeClick={onNodeClick}
             deleteKeyCode={DELETE_KEYS as unknown as string[]}
             fitView
-            fitViewOptions={FIT_VIEW}
+            fitViewOptions={{ padding: 0.2 }}
             defaultEdgeOptions={DEFAULT_EDGE_OPTIONS}
             style={{ width: '100%', height: '100%' }}
           >

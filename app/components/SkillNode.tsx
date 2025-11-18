@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
-import type { SkillNode } from './skillTypes';
+import type { SkillNode } from '../types/skillTypes';
 
 export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
   const {
@@ -105,7 +105,6 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
   );
 }
 
-// export nodeTypes map
 export const nodeTypes = {
   skill: SkillNodeComponent,
 };
