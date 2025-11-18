@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion';
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
-import type { SkillNode } from './skillTypes';
+import type { SkillNode } from '../types/skillTypes';
 
 export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
   const {
@@ -51,31 +51,31 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
         minHeight={60}
         className="skill-node-resize-control"
       />
-      {unlocked && (
         <div className="absolute top-1 right-1 flex gap-1">
           <button
             onClick={(e) => {
               e.stopPropagation();
               onEdit?.();
             }}
-            className="rounded-[2px] bg-white/80 px-1.5 py-0.5 text-[8px] font-semibold text-zinc-800 shadow"
+            className="rounded-[2px] bg-white/80 px-1.5 py-1 text-[8px] text-zinc-800 shadow leading-none"
           >
             Edit
           </button>
+          {unlocked && (
           <button
             onClick={(e) => {
               e.stopPropagation();
               onReset?.();
             }}
             className="
-              text-[8px] px-1.5 py-0.5
+              text-[8px] px-1.5 py-1
               bg-red-600 text-white rounded-[2px] shadow leading-none
             "
           >
             Reset
           </button>
-        </div>
       )}
+        </div>
 
       <div className="max-w-[300px] pr-14 text-sm font-medium leading-tight break-words">
         {name}
@@ -105,7 +105,6 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
   );
 }
 
-// export nodeTypes map
 export const nodeTypes = {
   skill: SkillNodeComponent,
 };
