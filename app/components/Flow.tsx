@@ -28,6 +28,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import { nodeTypes } from './SkillNode';
 import { SkillSidebar } from './SkillSidebar';
 import { Splash } from './Splash';
+import { EditNodeModal } from './EditNodeModal';
 import { useLocalStorage } from '../hooks/useLocalStorage';
 import type { SkillNode, SkillData, AppNode, AppEdge } from './skillTypes';
 
@@ -101,6 +102,11 @@ export default function Flow() {
   const [hasHydrated, setHasHydrated] = useState(false);
   const storageReady = nodesInitialized && edgesInitialized;
   const hasExistingTree = hadStoredNodes || hadStoredEdges;
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editCost, setEditCost] = useState('');
+  const [editLevel, setEditLevel] = useState('');
 
   /** Selection */
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
@@ -135,27 +141,6 @@ export default function Flow() {
       }),
     );
   }, []);
-
-  /** Ensure all skill nodes can reset themselves */
-  useEffect(() => {
-    setNodes((prev) => {
-      let changed = false;
-      const next = prev.map((node) => {
-        if (!isSkillNode(node)) return node;
-        const data = node.data as SkillData;
-        if (typeof data.onReset === 'function') return node;
-        changed = true;
-        return {
-          ...node,
-          data: {
-            ...data,
-            onReset: () => resetNode(node.id),
-          },
-        } as SkillNode;
-      });
-      return changed ? next : prev;
-    });
-  }, [resetNode]);
 
   const searchInfo = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -349,6 +334,89 @@ export default function Flow() {
     [],
   );
 
+  const startEditNode = useCallback(
+    (id: string) => {
+      const node = nodes.find(
+        (n): n is SkillNode => isSkillNode(n) && n.id === id,
+      );
+      if (!node) return;
+      const data = node.data as SkillData;
+      setEditName(data.name ?? '');
+      setEditDescription(data.description ?? '');
+      setEditCost(
+        typeof data.cost === 'number' && Number.isFinite(data.cost)
+          ? String(data.cost)
+          : '',
+      );
+      setEditLevel(
+        typeof data.level === 'number' && Number.isFinite(data.level)
+          ? String(data.level)
+          : '',
+      );
+      setEditingNodeId(id);
+    },
+    [nodes],
+  );
+
+  const closeEditModal = useCallback(() => {
+    setEditingNodeId(null);
+  }, []);
+
+  const handleEditSave = useCallback(() => {
+    if (!editingNodeId) return;
+    const safeNumber = (value: string, fallback?: number) => {
+      const trimmed = value.trim();
+      if (trimmed === '') return undefined;
+      const num = Number(trimmed);
+      return Number.isFinite(num) ? num : fallback;
+    };
+
+    setNodes((prev) =>
+      prev.map((node) => {
+        if (!isSkillNode(node) || node.id !== editingNodeId) return node;
+        const data = node.data as SkillData;
+        const updatedName = editName.trim() || data.name;
+        const updatedDescription = editDescription.trim() || undefined;
+        const updatedCost = safeNumber(editCost, data.cost);
+        const updatedLevel = safeNumber(editLevel, data.level);
+        return {
+          ...node,
+          data: {
+            ...data,
+            name: updatedName,
+            description: updatedDescription,
+            cost: updatedCost,
+            level: updatedLevel,
+            onReset: data.onReset ?? (() => resetNode(editingNodeId)),
+            onEdit: data.onEdit ?? (() => startEditNode(editingNodeId)),
+          },
+        } as SkillNode;
+      }),
+    );
+    setEditingNodeId(null);
+  }, [editingNodeId, editName, editDescription, editCost, editLevel, resetNode, setNodes, startEditNode]);
+
+  useEffect(() => {
+    if (!editingNodeId) return;
+    const node = nodes.find(
+      (n): n is SkillNode => isSkillNode(n) && n.id === editingNodeId,
+    );
+    if (!node) return;
+    const data = node.data as SkillData;
+    setEditName(data.name ?? '');
+    setEditDescription(data.description ?? '');
+    setEditCost(
+      typeof data.cost === 'number' && Number.isFinite(data.cost)
+        ? String(data.cost)
+        : '',
+    );
+    setEditLevel(
+      typeof data.level === 'number' && Number.isFinite(data.level)
+        ? String(data.level)
+        : '',
+    );
+  }, [editingNodeId, nodes]);
+
   /** Build new node (starts locked) */
   const buildNode = useCallback(
     (position: { x: number; y: number }): SkillNode => {
@@ -371,6 +439,7 @@ export default function Flow() {
         level: levelNum,
         unlocked: false,
         onReset: () => resetNode(id),
+        onEdit: () => startEditNode(id),
       };
 
       return {
@@ -382,7 +451,7 @@ export default function Flow() {
         targetPosition: Position.Left,
       } as SkillNode;
     },
-    [name, description, cost, level, resetNode],
+    [name, description, cost, level, resetNode, startEditNode],
   );
 
   /** Place by clicking the pane */
@@ -522,6 +591,34 @@ export default function Flow() {
     if (window.innerWidth <= 768) setSidebarOpen(false);
   };
 
+
+  /** Ensure all skill nodes have reset/edit handlers */
+  useEffect(() => {
+    setNodes((prev) => {
+      let changed = false;
+      const next = prev.map((node) => {
+        if (!isSkillNode(node)) return node;
+        const data = node.data as SkillData;
+        let nodeChanged = false;
+        const nextData = { ...data } as SkillData;
+        if (typeof data.onReset !== 'function') {
+          nextData.onReset = () => resetNode(node.id);
+          nodeChanged = true;
+        }
+        if (typeof data.onEdit !== 'function') {
+          nextData.onEdit = () => startEditNode(node.id);
+          nodeChanged = true;
+        }
+        if (nodeChanged) {
+          changed = true;
+          return { ...node, data: nextData } as SkillNode;
+        }
+        return node;
+      });
+      return changed ? next : prev;
+    });
+  }, [resetNode, startEditNode, setNodes]);
+
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) {
@@ -644,6 +741,19 @@ export default function Flow() {
           </ReactFlow>
         </div>
       </div>
+      <EditNodeModal
+        visible={Boolean(editingNodeId)}
+        name={editName}
+        description={editDescription}
+        cost={editCost}
+        level={editLevel}
+        onChangeName={setEditName}
+        onChangeDescription={setEditDescription}
+        onChangeCost={setEditCost}
+        onChangeLevel={setEditLevel}
+        onCancel={closeEditModal}
+        onSave={handleEditSave}
+      />
       <ToastContainer position="bottom-right" autoClose={3200} pauseOnHover closeOnClick theme="dark" />
       <Splash
         visible={showSplash}

@@ -14,6 +14,7 @@ import type {
     /** true = unlocked, false = locked */
     unlocked: boolean;
     onReset: () => void;
+    onEdit?: () => void;
     /** UI-only flags for search highlighting */
     searchMatch?: boolean;
     searchPath?: boolean;

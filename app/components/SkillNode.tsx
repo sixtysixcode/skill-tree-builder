@@ -12,6 +12,7 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
     level,
     unlocked,
     onReset,
+    onEdit,
     searchMatch,
     searchPath,
     searchDimmed,
@@ -43,20 +44,30 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
         ${searchDimClass} ${searchBorderClass}
       `}
     >
-      {/* Uncomplete button (only when unlocked) */}
       {unlocked && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onReset?.();
-          }}
-          className="
-            absolute top-1 right-1 text-[8px] p-1
-            bg-red-600 text-white rounded-[2px] shadow leading-none
-          "
-        >
-          Reset
-        </button>
+        <div className="absolute top-1 right-1 flex gap-1">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit?.();
+            }}
+            className="rounded-[2px] bg-white/80 px-1.5 py-0.5 text-[8px] font-semibold text-zinc-800 shadow"
+          >
+            Edit
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onReset?.();
+            }}
+            className="
+              text-[8px] px-1.5 py-0.5
+              bg-red-600 text-white rounded-[2px] shadow leading-none
+            "
+          >
+            Reset
+          </button>
+        </div>
       )}
 
       <div className="text-sm font-medium leading-tight">{name}</div>
