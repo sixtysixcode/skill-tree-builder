@@ -27,8 +27,8 @@ import 'react-toastify/dist/ReactToastify.css';
 
 import { nodeTypes } from './SkillNode';
 import { SkillSidebar } from './SkillSidebar';
-import type { SkillNode, SkillData, AppNode, AppEdge } from './skillTypes';
 import { Splash } from './Splash';
+import type { SkillNode, SkillData, AppNode, AppEdge } from './skillTypes';
 
 // constants
 const FIT_VIEW = { padding: 0.2 } as const;
@@ -509,30 +509,31 @@ export default function Flow() {
     if (window.innerWidth <= 768) setSidebarOpen(false);
   };
 
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 768) {
+        setSidebarOpen(true);
+      }
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   /** ---------- Layout & animated sidebar ---------- */
   return (
-    <div className="relative h-full w-full overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
-      <div className="flex h-full w-full">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
+      <div className="flex min-h-0 flex-1 w-full">
         {/* Sidebar as animated drawer */}
         <motion.div
-          animate={{ x: sidebarOpen ? 0 : -288 }} // w-72 = 18rem = 288px
+          animate={{
+            x: sidebarOpen ? 0 : -288,
+            width: sidebarOpen ? 288 : 0,
+          }}
+          initial={false}
           transition={{ duration: 0.45, ease: [0.23, 1.11, 0.32, 1] }}
-          className="fixed md:static top-0 left-0 h-full w-72 z-30 bg-zinc-900"
+          className="fixed md:static top-0 left-0 z-30 h-full flex-shrink-0 overflow-hidden bg-zinc-900"
         >
-          {/* Close button (mobile) */}
-          {sidebarOpen && (
-            <motion.button
-              onClick={() => setSidebarOpen(false)}
-              className="absolute top-3 right-3 z-40 md:hidden rounded bg-zinc-800 px-2 py-1 text-white shadow"
-              initial={false}
-              animate={{ rotate: 180 }}
-              whileTap={{ scale: 0.9 }}
-              transition={{ duration: 0.3 }}
-            >
-              ×
-            </motion.button>
-          )}
-
           {/* Sidebar content */}
           <SkillSidebar
             name={name}
@@ -564,6 +565,7 @@ export default function Flow() {
             onDetachSelected={detachSelectedNodes}
             onToggleAutoConnect={setAutoConnect}
             closeSidebarForMobile={closeSidebarForMobile}
+            onClose={() => setSidebarOpen(false)}
           />
         </motion.div>
 
@@ -582,11 +584,16 @@ export default function Flow() {
         {!sidebarOpen && (
           <motion.button
             onClick={() => setSidebarOpen(true)}
-            className="absolute top-3 left-3 z-40 md:hidden rounded bg-zinc-800 px-2 py-1 text-white shadow"
+            className="absolute top-3 left-3 z-40 md:hidden rounded bg-zinc-800 p-2 text-white shadow"
+            aria-label="Open sidebar"
             animate={{ rotate: sidebarOpen ? 90 : 0 }}
             whileTap={{ scale: 0.9 }}
           >
-            ☰
+            <span className="flex flex-col items-center justify-center gap-1">
+              <span className="block h-0.5 w-4 rounded bg-white" />
+              <span className="block h-0.5 w-4 rounded bg-white" />
+              <span className="block h-0.5 w-4 rounded bg-white" />
+            </span>
           </motion.button>
         )}
 
@@ -616,9 +623,7 @@ export default function Flow() {
         </div>
       </div>
       <ToastContainer position="bottom-right" autoClose={3200} pauseOnHover closeOnClick theme="dark" />
-      {showSplash && (
-       <Splash onStart={() => setShowSplash(false)} visible={showSplash} />
-      )}
+      <Splash visible={showSplash} onStart={() => setShowSplash(false)} />
     </div>
   );
 }

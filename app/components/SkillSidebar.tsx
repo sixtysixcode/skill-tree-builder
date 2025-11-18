@@ -24,6 +24,7 @@ type SkillSidebarProps = {
   onDetachSelected: () => void;
   onToggleAutoConnect: (value: boolean) => void;
   closeSidebarForMobile: () => void; // included because it's passed from Flow
+  onClose?: () => void;
 };
 
 export function SkillSidebar({
@@ -47,7 +48,8 @@ export function SkillSidebar({
   onDeleteSelected,
   onDetachSelected,
   onToggleAutoConnect,
-  closeSidebarForMobile, // not used in JSX, but kept for API parity
+  closeSidebarForMobile,
+  onClose,
 }: SkillSidebarProps) {
   return (
     <motion.div
@@ -68,7 +70,18 @@ export function SkillSidebar({
         }}
         className="flex flex-col gap-4"
       >
-        <h1 className="text-2xl">Skill Tree Builder</h1>
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl">Skill Tree Builder</h1>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="md:hidden rounded bg-zinc-800 px-2 py-1 text-sm text-white shadow"
+            >
+              Close
+            </button>
+          )}
+        </div>
         {/* Each input animated */}
         <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
           <label className="text-xs text-white">Name *</label>
