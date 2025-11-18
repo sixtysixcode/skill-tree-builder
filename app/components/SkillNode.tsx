@@ -5,22 +5,42 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { SkillNode } from './skillTypes';
 
 export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
-  const { name, description, cost, level, unlocked, onReset } = data;
+  const {
+    name,
+    description,
+    cost,
+    level,
+    unlocked,
+    onReset,
+    searchMatch,
+    searchPath,
+    searchDimmed,
+  } = data;
+
+  const baseBackgroundClass = unlocked ? 'bg-white' : 'bg-zinc-200';
+  const defaultBorderClass = unlocked ? 'border-3 border-green-400' : 'border-3 border-zinc-400';
+
+  const lockedOpacityClass =
+    !unlocked && !(searchMatch || searchPath) ? 'opacity-70' : '';
+
+  const searchDimClass = searchDimmed ? 'opacity-40 saturate-50' : '';
+
+  const searchBorderClass = searchMatch
+    ? 'border-[3px] border-amber-400'
+    : searchPath
+      ? 'border-[2px] border-amber-200'
+      : defaultBorderClass;
 
   return (
     <motion.div
       initial={{ scale: 1, opacity: 0 }}
-      animate={{
-        opacity: 1,
-        boxShadow: unlocked
-          ? ['0 0 0px rgba(0,255,90,0)', '0 0 12px rgba(0,255,90,0.6)', '0 0 0px rgba(0,255,90,0)']
-          : '0 0 0 rgba(0,0,0,0)',
-      }}
+      animate={{ opacity: 1 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
       className={`
-        relative max-w-[240px] rounded-lg border-3 px-3 py-2 shadow-sm
-        text-black
-        ${unlocked ? 'bg-white border-green-400' : 'bg-zinc-200 border-zinc-400 opacity-70'}
+        relative max-w-[240px] rounded-lg px-3 py-2
+        text-black transition
+        ${baseBackgroundClass} ${lockedOpacityClass}
+        ${searchDimClass} ${searchBorderClass}
       `}
     >
       {/* Uncomplete button (only when unlocked) */}

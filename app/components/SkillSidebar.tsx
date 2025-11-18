@@ -7,6 +7,7 @@ type SkillSidebarProps = {
   description: string;
   cost: string;
   level: string;
+  searchQuery: string;
   placeMode: boolean;
   autoConnect: boolean;
   canSubmit: boolean;
@@ -16,6 +17,7 @@ type SkillSidebarProps = {
   onDescriptionChange: (value: string) => void;
   onCostChange: (value: string) => void;
   onLevelChange: (value: string) => void;
+  onSearchChange: (value: string) => void;
   onTogglePlaceMode: () => void;
   onAddAtCenter: () => void;
   onDeleteSelected: () => void;
@@ -29,6 +31,7 @@ export function SkillSidebar({
   description,
   cost,
   level,
+  searchQuery,
   placeMode,
   autoConnect,
   canSubmit,
@@ -38,6 +41,7 @@ export function SkillSidebar({
   onDescriptionChange,
   onCostChange,
   onLevelChange,
+  onSearchChange,
   onTogglePlaceMode,
   onAddAtCenter,
   onDeleteSelected,
@@ -106,6 +110,19 @@ export function SkillSidebar({
             inputMode="numeric"
             className="h-8 w-full rounded border border-zinc-300 bg-white/10 px-2 text-sm placeholder-white"
           />
+        </motion.div>
+
+        <motion.div variants={{ hidden: { opacity: 0 }, show: { opacity: 1 } }}>
+          <label className="text-xs text-white">Search</label>
+          <input
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Find skill by name or description"
+            className="h-8 w-full rounded border border-amber-200 bg-white/5 px-2 text-sm placeholder-white/70 focus:border-amber-300 focus:outline-none"
+          />
+          <p className="mt-1 text-[11px] text-white/60">
+            Highlights matching skills and their prerequisite paths.
+          </p>
         </motion.div>
 
         {/* Buttons */}

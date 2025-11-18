@@ -14,6 +14,10 @@ import type {
     /** true = unlocked, false = locked */
     unlocked: boolean;
     onReset: () => void;
+    /** UI-only flags for search highlighting */
+    searchMatch?: boolean;
+    searchPath?: boolean;
+    searchDimmed?: boolean;
   };
   
   /** Custom node type for skills */

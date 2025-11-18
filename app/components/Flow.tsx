@@ -90,6 +90,7 @@ export default function Flow() {
   const [description, setDescription] = useState('');
   const [cost, setCost] = useState('');
   const [level, setLevel] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [placeMode, setPlaceMode] = useState(false);
   const [autoConnect, setAutoConnect] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -138,6 +139,120 @@ export default function Flow() {
       return changed ? next : prev;
     });
   }, [resetNode]);
+
+  const searchInfo = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    if (!query) {
+      return {
+        query,
+        matchedNodeIds: new Set<string>(),
+        pathNodeIds: new Set<string>(),
+        pathEdgeIds: new Set<string>(),
+      };
+    }
+
+    const matchedNodeIds = new Set<string>();
+    nodes.forEach((node) => {
+      if (!isSkillNode(node)) return;
+      const data = node.data as SkillData;
+      const haystack = `${data.name} ${data.description ?? ''}`.toLowerCase();
+      if (haystack.includes(query)) matchedNodeIds.add(node.id);
+    });
+
+    const pathNodeIds = new Set<string>(matchedNodeIds);
+    const pathEdgeIds = new Set<string>();
+
+    if (matchedNodeIds.size > 0) {
+      const incomingMap = new Map<string, AppEdge[]>();
+      edges.forEach((edge) => {
+        const list = incomingMap.get(edge.target);
+        if (list) {
+          list.push(edge);
+        } else {
+          incomingMap.set(edge.target, [edge]);
+        }
+      });
+
+      const stack = Array.from(matchedNodeIds);
+      while (stack.length > 0) {
+        const current = stack.pop();
+        if (!current) continue;
+        const incoming = incomingMap.get(current);
+        if (!incoming) continue;
+        incoming.forEach((edge) => {
+          pathEdgeIds.add(edge.id);
+          if (!pathNodeIds.has(edge.source)) {
+            pathNodeIds.add(edge.source);
+            stack.push(edge.source);
+          }
+        });
+      }
+    }
+
+    return {
+      query,
+      matchedNodeIds,
+      pathNodeIds,
+      pathEdgeIds,
+    };
+  }, [searchTerm, nodes, edges]);
+
+  const searchActive = searchInfo.query.length > 0;
+  const hasPathNodes = searchInfo.pathNodeIds.size > 0;
+  const hasPathEdges = searchInfo.pathEdgeIds.size > 0;
+
+  const renderedNodes = useMemo(() => {
+    if (!searchActive || !hasPathNodes) return nodes;
+    return nodes.map((node) => {
+      if (!isSkillNode(node)) return node;
+      const data = node.data as SkillData;
+      const match = searchInfo.matchedNodeIds.has(node.id);
+      const onPath = searchInfo.pathNodeIds.has(node.id);
+      if (!match && !onPath) return {
+        ...node,
+        data: {
+          ...data,
+          searchMatch: false,
+          searchPath: false,
+          searchDimmed: true,
+        },
+      } as SkillNode;
+      return {
+        ...node,
+        data: {
+          ...data,
+          searchMatch: match,
+          searchPath: onPath,
+          searchDimmed: !onPath,
+        },
+      } as SkillNode;
+    });
+  }, [nodes, searchActive, hasPathNodes, searchInfo]);
+
+  const renderedEdges = useMemo(() => {
+    if (!searchActive || !hasPathEdges) return edges;
+
+    return edges.map((edge) => {
+      if (searchInfo.pathEdgeIds.has(edge.id)) {
+        return {
+          ...edge,
+          style: {
+            ...(edge.style || {}),
+            stroke: '#fcd34d',
+            strokeWidth: 3,
+            opacity: 1,
+          },
+        };
+      }
+      return {
+        ...edge,
+        style: {
+          ...(edge.style || {}),
+          opacity: 0.2,
+        },
+      };
+    });
+  }, [edges, searchActive, hasPathEdges, searchInfo]);
 
   /** Changes (typed) */
   const onNodesChange: OnNodesChange<AppNode> = useCallback(
@@ -422,6 +537,7 @@ export default function Flow() {
             description={description}
             cost={cost}
             level={level}
+            searchQuery={searchTerm}
             placeMode={placeMode}
             autoConnect={autoConnect}
             canSubmit={canSubmit}
@@ -433,6 +549,7 @@ export default function Flow() {
             onDescriptionChange={setDescription}
             onCostChange={(v: string) => setCost(v.replace(/[^0-9]/g, ''))}
             onLevelChange={(v: string) => setLevel(v.replace(/[^0-9]/g, ''))}
+            onSearchChange={setSearchTerm}
             onTogglePlaceMode={() => {
               closeSidebarForMobile();
               setPlaceMode((v) => !v);
@@ -474,8 +591,8 @@ export default function Flow() {
         {/* Canvas */}
         <div className="h-full flex-1">
           <ReactFlow<AppNode, AppEdge>
-            nodes={nodes}
-            edges={edges}
+            nodes={renderedNodes}
+            edges={renderedEdges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
