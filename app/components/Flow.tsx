@@ -28,12 +28,42 @@ import 'react-toastify/dist/ReactToastify.css';
 import { nodeTypes } from './SkillNode';
 import { SkillSidebar } from './SkillSidebar';
 import { Splash } from './Splash';
+import { useLocalStorage } from '../hooks/useLocalStorage';
 import type { SkillNode, SkillData, AppNode, AppEdge } from './skillTypes';
 
 // constants
 const FIT_VIEW = { padding: 0.2 } as const;
 const DEFAULT_EDGE_OPTIONS = { animated: true } as const;
 const DELETE_KEYS = ['Delete', 'Backspace'] as const;
+
+const initialNodes: AppNode[] = [
+  {
+    id: '1',
+    type: 'skill',
+    position: { x: 40, y: 40 },
+    data: {
+      name: 'Slash',
+      description: 'Basic melee attack',
+      cost: 1,
+      level: 1,
+      unlocked: true,
+    } as SkillData,
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+  } as SkillNode,
+  {
+    id: '2',
+    type: 'skill',
+    position: { x: 280, y: 120 },
+    data: {
+      name: 'Cleave',
+      description: 'Arc attack hits multiple foes',
+      unlocked: false,
+    } as SkillData,
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+  } as SkillNode,
+];
 
 const initialEdges: AppEdge[] = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
 const CYCLE_ERROR_MESSAGE = 'Circular skill connections are not allowed.';
@@ -54,37 +84,9 @@ function shallowEqualIds(a: string[], b: string[]) {
 
 export default function Flow() {
   /** ---------- Seed graph ---------- */
-  const [nodes, setNodes] = useState<AppNode[]>([
-    {
-      id: '1',
-      type: 'skill',
-      position: { x: 40, y: 40 },
-      data: {
-        name: 'Slash',
-        description: 'Basic melee attack',
-        cost: 1,
-        level: 1,
-        unlocked: true,
-        // onReset is wired up after resetNode is defined, via closure
-      } as SkillData,
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
-    } as SkillNode,
-    {
-      id: '2',
-      type: 'skill',
-      position: { x: 280, y: 120 },
-      data: {
-        name: 'Cleave',
-        description: 'Arc attack hits multiple foes',
-        unlocked: false,
-      } as SkillData,
-      sourcePosition: Position.Right,
-      targetPosition: Position.Left,
-    } as SkillNode,
-  ]);
+  const [nodes, setNodes, hadStoredNodes] = useLocalStorage<AppNode[]>('skill-tree-nodes', initialNodes);
 
-  const [edges, setEdges] = useState<AppEdge[]>(initialEdges);
+  const [edges, setEdges, hadStoredEdges] = useLocalStorage<AppEdge[]>('skill-tree-edges', initialEdges);
 
   /** Form / UX */
   const [name, setName] = useState('');
@@ -96,6 +98,8 @@ export default function Flow() {
   const [autoConnect, setAutoConnect] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
+  const [hasHydrated, setHasHydrated] = useState(false);
+  const hasExistingTree = hadStoredNodes || hadStoredEdges;
 
   /** Selection */
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
@@ -104,6 +108,16 @@ export default function Flow() {
   /** ID source */
   const idRef = useRef(3);
   const nextId = () => String(idRef.current++);
+
+  useEffect(() => {
+    const maxId = nodes.reduce((max, node) => {
+      const numericId = Number(node.id);
+      return Number.isFinite(numericId) ? Math.max(max, numericId) : max;
+    }, 0);
+    if (maxId + 1 > idRef.current) {
+      idRef.current = maxId + 1;
+    }
+  }, [nodes]);
 
   /** Instance (typed with your unions) */
   const { screenToFlowPosition, deleteElements } = useReactFlow<AppNode, AppEdge>();
@@ -520,7 +534,13 @@ export default function Flow() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  useEffect(() => {
+    setHasHydrated(true);
+  }, []);
+
   /** ---------- Layout & animated sidebar ---------- */
+  const splashCtaLabel = hasHydrated && hasExistingTree ? 'Continue with my tree' : undefined;
+
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
       <div className="flex min-h-0 flex-1 w-full">
@@ -623,7 +643,11 @@ export default function Flow() {
         </div>
       </div>
       <ToastContainer position="bottom-right" autoClose={3200} pauseOnHover closeOnClick theme="dark" />
-      <Splash visible={showSplash} onStart={() => setShowSplash(false)} />
+      <Splash
+        visible={showSplash}
+        onStart={() => setShowSplash(false)}
+        ctaLabel={splashCtaLabel}
+      />
     </div>
   );
 }
