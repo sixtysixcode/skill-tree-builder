@@ -28,6 +28,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import { nodeTypes } from './SkillNode';
 import { SkillSidebar } from './SkillSidebar';
 import type { SkillNode, SkillData, AppNode, AppEdge } from './skillTypes';
+import { Splash } from './Splash';
 
 // constants
 const FIT_VIEW = { padding: 0.2 } as const;
@@ -94,6 +95,7 @@ export default function Flow() {
   const [placeMode, setPlaceMode] = useState(false);
   const [autoConnect, setAutoConnect] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showSplash, setShowSplash] = useState(true);
 
   /** Selection */
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
@@ -509,7 +511,7 @@ export default function Flow() {
 
   /** ---------- Layout & animated sidebar ---------- */
   return (
-    <div className="h-full w-full overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
+    <div className="relative h-full w-full overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
       <div className="flex h-full w-full">
         {/* Sidebar as animated drawer */}
         <motion.div
@@ -614,6 +616,9 @@ export default function Flow() {
         </div>
       </div>
       <ToastContainer position="bottom-right" autoClose={3200} pauseOnHover closeOnClick theme="dark" />
+      {showSplash && (
+       <Splash onStart={() => setShowSplash(false)} visible={showSplash} />
+      )}
     </div>
   );
 }
