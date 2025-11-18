@@ -66,6 +66,10 @@ app/
 ### Bonuses
 - Handled prevention of circular dependencies using `wouldCreateCycle` function inside Flow.tsx. Display Toast error notification.
 - Added node search functionality with search bar inside SkillSidebar.tsx. Finds nodes with name/description matching search query, highlights nodes with an orange border and highlights tree path to matching node.
+- If a primary node is active and a new node (inactive) is connected (becoming the primary node) the active node (now secondary) is automatically reverted to inactive.
+- Created a database on Supabase to store tree, skill_node and skill_edge's. 
+- Used Supabase Realtime to display collaborator mouse position, node creation, editing and deletion.
+- When a new tree is created the user can set a password which can be shared with collaborators for security.
 
 ### AI Usage
 - Used to scaffold initial components, define types and write unit tests. All AI generated code reviewed and refactored where necessary.
