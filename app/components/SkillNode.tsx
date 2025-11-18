@@ -51,7 +51,6 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
         minHeight={60}
         className="skill-node-resize-control"
       />
-      {unlocked && (
         <div className="absolute top-1 right-1 flex gap-1">
           <button
             onClick={(e) => {
@@ -62,6 +61,7 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
           >
             Edit
           </button>
+          {unlocked && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -74,8 +74,8 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
           >
             Reset
           </button>
-        </div>
       )}
+        </div>
 
       <div className="max-w-[300px] pr-14 text-sm font-medium leading-tight break-words">
         {name}
