@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
 import type { SkillNode } from './skillTypes';
 
 export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
@@ -38,12 +38,19 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
       className={`
-        relative max-w-[240px] rounded-lg px-3 py-2
+        relative rounded-lg px-3 py-2
         text-black transition
         ${baseBackgroundClass} ${lockedOpacityClass}
         ${searchDimClass} ${searchBorderClass}
       `}
+      style={{ minHeight: 60 }}
     >
+      <NodeResizeControl
+        position="bottom-right"
+        minWidth={150}
+        minHeight={60}
+        className="skill-node-resize-control"
+      />
       {unlocked && (
         <div className="absolute top-1 right-1 flex gap-1">
           <button
@@ -70,7 +77,9 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
         </div>
       )}
 
-      <div className="text-sm font-medium leading-tight">{name}</div>
+      <div className="max-w-[300px] pr-14 text-sm font-medium leading-tight break-words">
+        {name}
+      </div>
       {description && (
         <div className="mt-0.5 text-[11px] leading-snug text-zinc-600">{description}</div>
       )}

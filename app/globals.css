@@ -37,3 +37,17 @@ body {
 .animate-fadeIn {
   animation: fadeIn 0.2s ease-out forwards;
 }
+
+.skill-node-resize-control {
+  width: auto;
+  height: auto;
+}
+
+.skill-node-resize-control > .skill-node-resize-handle {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  background: linear-gradient(135deg, #fbbf24, #f97316);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  cursor: se-resize;
+}

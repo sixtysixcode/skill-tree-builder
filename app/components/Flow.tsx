@@ -37,6 +37,8 @@ const FIT_VIEW = { padding: 0.2 } as const;
 const DEFAULT_EDGE_OPTIONS = { animated: true } as const;
 const DELETE_KEYS = ['Delete', 'Backspace'] as const;
 
+const DEFAULT_NODE_STYLE = { width: 260, minHeight: 120 } as const;
+
 const initialNodes: AppNode[] = [
   {
     id: '1',
@@ -51,6 +53,7 @@ const initialNodes: AppNode[] = [
     } as SkillData,
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
+    style: { ...DEFAULT_NODE_STYLE },
   } as SkillNode,
   {
     id: '2',
@@ -63,6 +66,7 @@ const initialNodes: AppNode[] = [
     } as SkillData,
     sourcePosition: Position.Right,
     targetPosition: Position.Left,
+    style: { ...DEFAULT_NODE_STYLE },
   } as SkillNode,
 ];
 
@@ -449,6 +453,7 @@ export default function Flow() {
         data,
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
+        style: { ...DEFAULT_NODE_STYLE },
       } as SkillNode;
     },
     [name, description, cost, level, resetNode, startEditNode],
@@ -609,9 +614,19 @@ export default function Flow() {
           nextData.onEdit = () => startEditNode(node.id);
           nodeChanged = true;
         }
-        if (nodeChanged) {
+        let styleChanged = false;
+        const nextStyle = { ...(node.style ?? {}) };
+        if (typeof nextStyle.width !== 'number') {
+          nextStyle.width = DEFAULT_NODE_STYLE.width;
+          styleChanged = true;
+        }
+        if (typeof nextStyle.minHeight !== 'number') {
+          nextStyle.minHeight = DEFAULT_NODE_STYLE.minHeight;
+          styleChanged = true;
+        }
+        if (nodeChanged || styleChanged) {
           changed = true;
-          return { ...node, data: nextData } as SkillNode;
+          return { ...node, data: nextData, style: nextStyle } as SkillNode;
         }
         return node;
       });
