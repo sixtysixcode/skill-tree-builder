@@ -52,7 +52,7 @@ export function Splash({
             </button>
             {onReset && (
               <button
-                className="mt-4 w-full rounded-[10px] border border-white/60 px-8 py-3 text-sm font-semibold text-white/80 transition hover:bg-white/10"
+                className="mt-4 w-full rounded-[10px] border border-white/60 px-8 py-3 text-base font-semibold text-white/80 transition hover:bg-white/10"
                 onClick={onReset}
                 type="button"
               >
