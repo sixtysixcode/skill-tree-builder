@@ -4,6 +4,8 @@ import { FormEvent, useCallback, useState } from 'react';
 import { motion } from 'framer-motion';
 
 type SkillSidebarProps = {
+  treeId: string;
+  treeTitle: string;
   name: string;
   description: string;
   cost: string;
@@ -23,10 +25,15 @@ type SkillSidebarProps = {
   onDeleteSelected: () => void;
   onDetachSelected: () => void;
   onToggleAutoConnect: (value: boolean) => void;
+  onResetTree?: () => void;
+  canResetTree?: boolean;
+  onOpenShareModal: () => void;
   onClose?: () => void;
 };
 
 export function SkillSidebar({
+  treeId,
+  treeTitle,
   name,
   description,
   cost,
@@ -46,9 +53,13 @@ export function SkillSidebar({
   onDeleteSelected,
   onDetachSelected,
   onToggleAutoConnect,
+  onResetTree,
+  canResetTree = false,
+  onOpenShareModal,
   onClose,
 }: SkillSidebarProps) {
   const [errors, setErrors] = useState<{ name?: string; description?: string }>({});
+  const [copied, setCopied] = useState(false);
 
   const validateForm = useCallback(() => {
     const nextErrors: { name?: string; description?: string } = {};
@@ -88,6 +99,17 @@ export function SkillSidebar({
 
   const digitsOnly = (value: string) => value.replace(/[^0-9]/g, '');
 
+  const handleCopyLink = async () => {
+    try {
+      const url = `${window.location.origin}/tree/${treeId}`;
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, x: -20 }}
@@ -108,8 +130,37 @@ export function SkillSidebar({
         className="flex flex-col gap-4"
         onSubmit={handleSubmit}
       >
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl">Skill Tree Builder</h1>
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl">{treeTitle}</h1>
+            <p className="text-xs text-white/60">ID: <span className="font-mono">{treeId}</span></p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={handleCopyLink}
+                className="rounded bg-white/10 px-2 py-1 text-xs"
+              >
+                {copied ? 'Link copied!' : 'Copy link'}
+              </button>
+              <button
+                type="button"
+                onClick={onOpenShareModal}
+                className="rounded border border-white/30 px-2 py-1 text-xs text-white/80"
+              >
+                Share settings
+              </button>
+            </div>
+            {onResetTree && (
+              <button
+                type="button"
+                onClick={onResetTree}
+                disabled={!canResetTree}
+                className="mt-2 rounded border border-white/20 px-2 py-1 text-xs text-white/80 disabled:opacity-50"
+              >
+                Reset tree
+              </button>
+            )}
+          </div>
           {onClose && (
             <button
               type="button"

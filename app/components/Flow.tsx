@@ -20,6 +20,8 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
+import Link from 'next/link';
+import bcrypt from 'bcryptjs';
 import { motion } from 'framer-motion';
 
 import { ToastContainer, toast } from 'react-toastify';
@@ -27,20 +29,114 @@ import 'react-toastify/dist/ReactToastify.css';
 
 import { nodeTypes } from './SkillNode';
 import { SkillSidebar } from './SkillSidebar';
-import { Splash } from './Splash';
 import { EditNodeModal } from './EditNodeModal';
-import { useLocalStorage } from '../hooks/useLocalStorage';
 import type { SkillNode, SkillData, AppNode, AppEdge } from '../types/skillTypes';
-import { shallowEqual } from '../utils/helpers';
-import { isSkillNode } from '../utils/helpers';
+import { shallowEqual, isSkillNode } from '../utils/helpers';
 import { CYCLE_ERROR_MESSAGE, DEFAULT_EDGE_OPTIONS, DEFAULT_NODE_STYLE, DELETE_KEYS, initialEdges, initialNodes } from '../constants/canvasConstants';
+import { supabase } from '../lib/supabaseClient';
+import type { RealtimeChannel } from '@supabase/supabase-js';
 
 type EdgeConnection = Connection & Partial<Pick<AppEdge, 'id' | 'animated'>>;
 
-export default function Flow() {
+type FlowProps = {
+  treeId: string;
+};
+
+type SkillNodeRow = {
+  id: string;
+  tree_id: string;
+  name: string;
+  description: string | null;
+  cost: number | null;
+  level: number | null;
+  unlocked: boolean;
+  position: { x: number; y: number } | null;
+};
+
+type SkillEdgeRow = {
+  id: string;
+  tree_id: string;
+  source: string;
+  target: string;
+  animated: boolean | null;
+};
+
+type RemoteCursor = {
+  id: string;
+  flowX?: number;
+  flowY?: number;
+  color: string;
+  label: string;
+  lastUpdated: number;
+  action?: string;
+};
+
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).slice(2);
+};
+
+const mapNodeRow = (row: SkillNodeRow): SkillNode =>
+  ({
+    id: row.id,
+    type: 'skill',
+    position: row.position ?? { x: 0, y: 0 },
+    data: {
+      name: row.name,
+      description: row.description ?? undefined,
+      cost: row.cost ?? undefined,
+      level: row.level ?? undefined,
+      unlocked: row.unlocked,
+    },
+    sourcePosition: Position.Right,
+    targetPosition: Position.Left,
+    style: { ...DEFAULT_NODE_STYLE },
+  }) as SkillNode;
+
+const mapEdgeRow = (row: SkillEdgeRow): AppEdge => ({
+  id: row.id,
+  source: row.source,
+  target: row.target,
+  animated: row.animated ?? true,
+});
+
+const buildSeedGraph = () => {
+  const idMap = new Map<string, string>();
+  const seededNodes = initialNodes.map((node) => {
+    const newId = generateId();
+    idMap.set(node.id, newId);
+    const data = node.data as SkillData;
+    return {
+      ...node,
+      id: newId,
+      data: {
+        ...data,
+        unlocked: Boolean(data.unlocked),
+      },
+    } as SkillNode;
+  });
+
+  const seededEdges = initialEdges.map((edge) => ({
+    id: generateId(),
+    source: idMap.get(edge.source) ?? edge.source,
+    target: idMap.get(edge.target) ?? edge.target,
+    animated: edge.animated,
+  }));
+
+  return { seededNodes, seededEdges };
+};
+
+const CURSOR_COLORS = ['#f97316', '#22d3ee', '#a855f7', '#facc15', '#34d399', '#fb7185', '#60a5fa'];
+
+export default function Flow({ treeId }: FlowProps) {
   /** ---------- Seed graph ---------- */
-  const [nodes, setNodes, hadStoredNodes, nodesInitialized] = useLocalStorage<AppNode[]>('skill-tree-nodes', initialNodes);
-  const [edges, setEdges, hadStoredEdges, edgesInitialized] = useLocalStorage<AppEdge[]>('skill-tree-edges', initialEdges);
+  const [nodes, setNodes] = useState<AppNode[]>([]);
+  const [edges, setEdges] = useState<AppEdge[]>([]);
+  const [treeLoading, setTreeLoading] = useState(true);
+  const [treeError, setTreeError] = useState<string | null>(null);
+  const [hasExistingTree, setHasExistingTree] = useState(false);
 
   /** Form / UX */
   const [name, setName] = useState('');
@@ -51,39 +147,343 @@ export default function Flow() {
   const [placeMode, setPlaceMode] = useState(false);
   const [autoConnect, setAutoConnect] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [showSplash, setShowSplash] = useState(true);
-  const [hasHydrated, setHasHydrated] = useState(false);
-  const storageReady = nodesInitialized && edgesInitialized;
-  const hasExistingTree = hadStoredNodes || hadStoredEdges;
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editCost, setEditCost] = useState('');
   const [editLevel, setEditLevel] = useState('');
+  const [treeTitle, setTreeTitle] = useState<string>('Skill Tree');
+  const [hasTreePassword, setHasTreePassword] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
+  const [lastSharedPassword, setLastSharedPassword] = useState<string | null>(null);
+  const [remoteCursors, setRemoteCursors] = useState<Record<string, RemoteCursor>>({});
 
   /** Selection */
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [selectedEdgeIds, setSelectedEdgeIds] = useState<string[]>([]);
 
-  /** ID source for nodes */
-  const idRef = useRef(3);
-  const nextId = () => String(idRef.current++);
-
-  /** Ensure all node IDs are always unique */
-  useEffect(() => {
-    // Find the largest ID
-    const maxId = nodes.reduce((max, node) => {
-      const numericId = Number(node.id);
-      return Number.isFinite(numericId) ? Math.max(max, numericId) : max;
-    }, 0);
-    // Set current IdRef to largest existing ID + 1
-    if (maxId + 1 > idRef.current) {
-      idRef.current = maxId + 1;
-    }
-  }, [nodes]);
-
   /** Instance (typed with unions) - to place nodes in the correct coordinates on the canvas and delete nodes */
-  const { screenToFlowPosition, deleteElements } = useReactFlow<AppNode, AppEdge>();
+  const { screenToFlowPosition, deleteElements, getViewport } = useReactFlow<AppNode, AppEdge>();
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const presenceChannelRef = useRef<RealtimeChannel | null>(null);
+  const changeChannelRef = useRef<RealtimeChannel | null>(null);
+  const lastCursorSendRef = useRef(0);
+  const lastNodeBroadcastRef = useRef<Record<string, number>>({});
+  const clientId = useMemo(() => generateId(), []);
+  const userColor = useMemo(() => CURSOR_COLORS[Math.floor(Math.random() * CURSOR_COLORS.length)], []);
+  const displayName = useMemo(() => `User ${clientId.slice(-4)}`, [clientId]);
+
+  const shareLink = typeof window !== 'undefined' ? `${window.location.origin}/tree/${treeId}` : '';
+
+  const handleCopyShareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 1500);
+    } catch {
+      toast.error('Failed to copy link');
+    }
+  };
+
+  const handlePasswordUpdate = async () => {
+    if (!newPasswordInput.trim()) {
+      setPasswordMessage('Enter a password before saving.');
+      return;
+    }
+    setPasswordSaving(true);
+    setPasswordMessage(null);
+    try {
+      const hash = await bcrypt.hash(newPasswordInput, 10);
+      const { error } = await supabase.from('trees').update({ password_hash: hash }).eq('id', treeId);
+      if (error) throw error;
+      setHasTreePassword(true);
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem(`tree-auth:${treeId}`, 'granted');
+      }
+      setLastSharedPassword(newPasswordInput);
+      setNewPasswordInput('');
+      setPasswordMessage('Password updated. Share it with collaborators.');
+      broadcastAction('Updated tree password');
+    } catch (err) {
+      setPasswordMessage(err instanceof Error ? err.message : 'Failed to update password');
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  const sendCursorPosition = useCallback(
+    (flowX: number, flowY: number) => {
+      const channel = presenceChannelRef.current;
+      if (!channel) return;
+      const now = Date.now();
+      if (now - lastCursorSendRef.current < 40) return;
+      lastCursorSendRef.current = now;
+      channel.send({
+        type: 'broadcast',
+        event: 'cursor-move',
+        payload: { id: clientId, flowX, flowY, color: userColor, name: displayName },
+      });
+    },
+    [clientId, displayName, userColor],
+  );
+
+  const sendNodePosition = useCallback(
+    (nodeId: string, position: { x: number; y: number }) => {
+      const channel = presenceChannelRef.current;
+      if (!channel) return;
+      const now = Date.now();
+      const last = lastNodeBroadcastRef.current[nodeId] ?? 0;
+      if (now - last < 60) return;
+      lastNodeBroadcastRef.current[nodeId] = now;
+      channel.send({
+        type: 'broadcast',
+        event: 'node-position',
+        payload: { id: clientId, nodeId, position },
+      });
+    },
+    [clientId],
+  );
+
+  const broadcastAction = useCallback(
+    (message: string) => {
+      const channel = presenceChannelRef.current;
+      if (!channel) return;
+      channel.send({
+        type: 'broadcast',
+        event: 'action',
+        payload: { id: clientId, message },
+      });
+    },
+    [clientId],
+  );
+
+  const handleRemovePassword = async () => {
+    setPasswordSaving(true);
+    setPasswordMessage(null);
+    try {
+      const { error } = await supabase.from('trees').update({ password_hash: null }).eq('id', treeId);
+      if (error) throw error;
+      setHasTreePassword(false);
+      setLastSharedPassword(null);
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem(`tree-auth:${treeId}`);
+      }
+      setPasswordMessage('Password removed. Tree is now public.');
+      broadcastAction('Removed tree password');
+    } catch (err) {
+      setPasswordMessage(err instanceof Error ? err.message : 'Failed to remove password');
+    } finally {
+      setPasswordSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    setHasExistingTree(nodes.length > 0 || edges.length > 0);
+  }, [nodes, edges]);
+
+  useEffect(() => {
+    const channel = supabase.channel(`tree-presence:${treeId}`, {
+      config: { presence: { key: clientId } },
+    });
+    presenceChannelRef.current = channel;
+
+    const syncPresence = () => {
+      const state = channel.presenceState() as Record<string, Array<{ name?: string; color?: string }>>;
+      setRemoteCursors((prev) => {
+        const next: Record<string, RemoteCursor> = {};
+        Object.entries(state).forEach(([key, sessions]) => {
+          if (key === clientId || sessions.length === 0) return;
+          const meta = sessions[sessions.length - 1];
+          const existing = prev[key];
+          next[key] = {
+            id: key,
+            flowX: existing?.flowX,
+            flowY: existing?.flowY,
+            action: existing?.action,
+            lastUpdated: existing?.lastUpdated ?? Date.now(),
+            color: (meta?.color as string | undefined) ?? existing?.color ?? '#f97316',
+            label: (meta?.name as string | undefined) ?? existing?.label ?? `User ${key.slice(-4)}`,
+          };
+        });
+        return next;
+      });
+    };
+
+    channel
+      .on('presence', { event: 'sync' }, syncPresence)
+      .on('presence', { event: 'leave' }, ({ key }) => {
+        if (key === clientId) return;
+        setRemoteCursors((prev) => {
+          const next = { ...prev };
+          delete next[key];
+          return next;
+        });
+      })
+      .on('broadcast', { event: 'cursor-move' }, ({ payload }) => {
+      if (!payload || payload.id === clientId) return;
+        if (payload.hidden) {
+          setRemoteCursors((prev) => {
+            const next = { ...prev };
+            delete next[payload.id];
+            return next;
+          });
+          return;
+        }
+        setRemoteCursors((prev) => {
+          const existing = prev[payload.id] ?? {
+            id: payload.id,
+            color: payload.color ?? '#f97316',
+            label: payload.name ?? `User ${payload.id.slice(-4)}`,
+            lastUpdated: Date.now(),
+          } as RemoteCursor;
+          return {
+            ...prev,
+            [payload.id]: {
+              ...existing,
+              flowX: payload.flowX ?? existing.flowX,
+              flowY: payload.flowY ?? existing.flowY,
+              lastUpdated: Date.now(),
+              action: payload.action ?? existing.action,
+            },
+          };
+        });
+      })
+      .on('broadcast', { event: 'node-position' }, ({ payload }) => {
+        if (!payload || payload.id === clientId) return;
+        const { nodeId, position } = payload;
+        if (!nodeId || !position) return;
+        setNodes((prev) =>
+          prev.map((node) =>
+            node.id === nodeId ? { ...node, position } : node,
+          ),
+        );
+      })
+      .on('broadcast', { event: 'action' }, ({ payload }) => {
+        if (!payload || payload.id === clientId) return;
+        setRemoteCursors((prev) => {
+          const existing = prev[payload.id];
+          if (!existing) return prev;
+          return {
+            ...prev,
+            [payload.id]: { ...existing, action: payload.message, lastUpdated: Date.now() },
+          };
+        });
+      });
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        channel.track({ treeId, name: displayName, color: userColor });
+      }
+    });
+
+    return () => {
+      supabase.removeChannel(channel);
+      presenceChannelRef.current = null;
+      setRemoteCursors({});
+    };
+  }, [treeId, clientId, displayName, userColor]);
+
+  useEffect(() => {
+    const channel = supabase.channel(`tree-updates:${treeId}`, {
+      config: { broadcast: { ack: false } },
+    });
+    changeChannelRef.current = channel;
+    channel
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_nodes', filter: `tree_id=eq.${treeId}` }, (payload) => {
+        if (payload.eventType === 'INSERT' && payload.new) {
+          setNodes((prev) => {
+            if (prev.some((n) => n.id === payload.new.id)) return prev;
+            return prev.concat(mapNodeRow(payload.new as SkillNodeRow));
+          });
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          setNodes((prev) =>
+            prev.map((node) => (node.id === payload.new.id ? mapNodeRow(payload.new as SkillNodeRow) : node)),
+          );
+        } else if (payload.eventType === 'DELETE' && payload.old) {
+          setNodes((prev) => prev.filter((node) => node.id !== payload.old.id));
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'skill_edges', filter: `tree_id=eq.${treeId}` }, (payload) => {
+        if (payload.eventType === 'INSERT' && payload.new) {
+          setEdges((prev) => {
+            if (prev.some((edge) => edge.id === payload.new.id)) return prev;
+            return prev.concat(mapEdgeRow(payload.new as SkillEdgeRow));
+          });
+        } else if (payload.eventType === 'UPDATE' && payload.new) {
+          setEdges((prev) =>
+            prev.map((edge) => (edge.id === payload.new.id ? mapEdgeRow(payload.new as SkillEdgeRow) : edge)),
+          );
+        } else if (payload.eventType === 'DELETE' && payload.old) {
+          setEdges((prev) => prev.filter((edge) => edge.id !== payload.old.id));
+        }
+      });
+
+    channel.subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      changeChannelRef.current = null;
+    };
+  }, [treeId]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const now = Date.now();
+      setRemoteCursors((prev) => {
+        let changed = false;
+        const next: Record<string, RemoteCursor> = {};
+        Object.values(prev).forEach((cursor) => {
+          if (now - cursor.lastUpdated <= 5000) {
+            next[cursor.id] = cursor;
+          } else {
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    }, 4000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    setTreeLoading(true);
+    setTreeError(null);
+    const load = async () => {
+      const [nodesResult, edgesResult, treeResult] = await Promise.all([
+        supabase.from('skill_nodes').select('*').eq('tree_id', treeId),
+        supabase.from('skill_edges').select('*').eq('tree_id', treeId),
+        supabase.from('trees').select('title,password_hash').eq('id', treeId).single(),
+      ]);
+      if (!active) return;
+      if (treeResult.error) {
+        setTreeError(treeResult.error.message);
+        setTreeLoading(false);
+        return;
+      }
+      setTreeTitle(treeResult.data?.title ?? 'Skill Tree');
+      setHasTreePassword(Boolean(treeResult.data?.password_hash));
+      if (nodesResult.error || edgesResult.error) {
+        setTreeError(nodesResult.error?.message ?? edgesResult.error?.message ?? 'Failed to load tree');
+        setTreeLoading(false);
+        return;
+      }
+      const mappedNodes = (nodesResult.data as SkillNodeRow[]).map(mapNodeRow);
+      const mappedEdges = (edgesResult.data as SkillEdgeRow[]).map(mapEdgeRow);
+      setNodes(mappedNodes);
+      setEdges(mappedEdges);
+      setHasExistingTree(mappedNodes.length > 0 || mappedEdges.length > 0);
+      setTreeLoading(false);
+    };
+    load();
+    return () => {
+      active = false;
+    };
+  }, [treeId]);
 
   /** Reset a node to locked */
   const resetNode = useCallback(
@@ -218,13 +618,34 @@ export default function Flow() {
 
   /** Changes (typed) */
   const onNodesChange: OnNodesChange<AppNode> = useCallback(
-    (changes) => setNodes((nds) => applyNodeChanges<AppNode>(changes, nds)),
-    [setNodes],
+    (changes) => {
+      const updates: { id: string; position: { x: number; y: number } }[] = [];
+      setNodes((nds) => {
+        const next = applyNodeChanges<AppNode>(changes, nds);
+        changes.forEach((change) => {
+          if (change.type === 'position') {
+            const node = next.find((n) => n.id === change.id);
+            if (node) {
+              if (change.dragging) {
+                sendNodePosition(node.id, node.position);
+              } else {
+                updates.push({ id: node.id, position: node.position });
+              }
+            }
+          }
+        });
+        return next;
+      });
+      updates.forEach(({ id, position }) => {
+        void supabase.from('skill_nodes').update({ position }).eq('id', id);
+      });
+    },
+    [sendNodePosition],
   );
 
   const onEdgesChange: OnEdgesChange<AppEdge> = useCallback(
     (changes) => setEdges((eds) => applyEdgeChanges<AppEdge>(changes, eds)),
-    [setEdges],
+    [],
   );
 
   const wouldCreateCycle = useCallback(
@@ -266,18 +687,36 @@ export default function Flow() {
         toast.error(CYCLE_ERROR_MESSAGE, { autoClose: 3200 });
         return false;
       }
+      const id = connection.id ?? generateId();
       setEdges((eds) =>
         addEdge<AppEdge>(
           {
             animated: true,
             ...connection,
+            id,
           },
           eds,
         ),
       );
+      void supabase
+        .from('skill_edges')
+        .insert({
+          id,
+          tree_id: treeId,
+          source: connection.source,
+          target: connection.target,
+          animated: connection.animated ?? true,
+        })
+        .then(({ error }) => {
+          if (error) {
+            toast.error('Failed to save edge');
+          } else {
+            broadcastAction('Created a connection');
+          }
+        });
       return true;
     },
-    [wouldCreateCycle, setEdges],
+    [wouldCreateCycle, treeId, broadcastAction],
   );
 
   const onConnect: OnConnect = useCallback(
@@ -331,14 +770,20 @@ export default function Flow() {
       return Number.isFinite(num) ? num : fallback;
     };
 
+    let updatedName = '';
+    let updatedDescription: string | undefined;
+    let updatedCost: number | undefined;
+    let updatedLevel: number | undefined;
+    let nodeUpdated = false;
     setNodes((prev) =>
       prev.map((node) => {
         if (!isSkillNode(node) || node.id !== editingNodeId) return node;
+        nodeUpdated = true;
         const data = node.data as SkillData;
-        const updatedName = editName.trim() || data.name;
-        const updatedDescription = editDescription.trim() || undefined;
-        const updatedCost = safeNumber(editCost, data.cost);
-        const updatedLevel = safeNumber(editLevel, data.level);
+        updatedName = editName.trim() || data.name;
+        updatedDescription = editDescription.trim() || undefined;
+        updatedCost = safeNumber(editCost, data.cost);
+        updatedLevel = safeNumber(editLevel, data.level);
         return {
           ...node,
           data: {
@@ -354,12 +799,26 @@ export default function Flow() {
       }),
     );
     setEditingNodeId(null);
-  }, [editingNodeId, editName, editDescription, editCost, editLevel, resetNode, setNodes, startEditNode]);
+    if (!nodeUpdated) return;
+    broadcastAction(`Updated "${updatedName}"`);
+    void supabase
+      .from('skill_nodes')
+      .update({
+        name: updatedName,
+        description: updatedDescription ?? null,
+        cost: typeof updatedCost === 'number' ? updatedCost : null,
+        level: typeof updatedLevel === 'number' ? updatedLevel : null,
+      })
+      .eq('id', editingNodeId)
+      .then(({ error }) => {
+        if (error) toast.error('Failed to update node');
+      });
+  }, [editingNodeId, editName, editDescription, editCost, editLevel, resetNode, setNodes, startEditNode, broadcastAction]);
 
   /** Build new node (starts locked) */
   const buildNode = useCallback(
     (position: { x: number; y: number }): SkillNode => {
-      const id = nextId();
+      const id = generateId();
       const costNumRaw = cost.trim() === '' ? undefined : Number(cost);
       const levelNumRaw = level.trim() === '' ? undefined : Number(level);
       const costNum =
@@ -381,7 +840,7 @@ export default function Flow() {
         onEdit: () => startEditNode(id),
       };
 
-      return {
+      const node = {
         id,
         type: 'skill',
         position,
@@ -390,8 +849,28 @@ export default function Flow() {
         targetPosition: Position.Left,
         style: { ...DEFAULT_NODE_STYLE },
       } as SkillNode;
+
+      void supabase
+        .from('skill_nodes')
+        .insert({
+          id,
+          tree_id: treeId,
+          name: data.name,
+          description: data.description ?? null,
+          cost: costNum ?? null,
+          level: levelNum ?? null,
+          unlocked: data.unlocked,
+          position,
+        })
+        .then(({ error }) => {
+          if (error) {
+            toast.error('Failed to save node');
+          }
+        });
+
+      return node;
     },
-    [name, description, cost, level, resetNode, startEditNode],
+    [name, description, cost, level, resetNode, startEditNode, treeId],
   );
 
   /** Place by clicking the pane */
@@ -402,6 +881,7 @@ export default function Flow() {
       const node = buildNode(pos);
 
       setNodes((nds) => nds.concat(node));
+      broadcastAction(`Added "${(node.data as SkillData).name}"`);
 
       if (autoConnect && selectedNodeIds[0]) {
         const from = selectedNodeIds[0];
@@ -416,7 +896,7 @@ export default function Flow() {
       }
       setPlaceMode(false);
     },
-    [placeMode, screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely, setNodes, setPlaceMode],
+    [placeMode, screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely, setNodes, setPlaceMode, broadcastAction],
   );
 
   /** Add at center */
@@ -434,6 +914,7 @@ export default function Flow() {
     const node = buildNode(center);
 
     setNodes((nds) => nds.concat(node));
+    broadcastAction(`Added "${(node.data as SkillData).name}" at center`);
 
     if (autoConnect && selectedNodeIds[0]) {
       const from = selectedNodeIds[0];
@@ -446,7 +927,7 @@ export default function Flow() {
         animated: true,
       });
     }
-  }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely, setNodes]);
+  }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely, setNodes, broadcastAction]);
 
   /** Selection handler (typed) */
   const onSelectionChange = useCallback(
@@ -464,7 +945,7 @@ export default function Flow() {
   const onNodeClick: NodeMouseHandler<AppNode> = useCallback(
     (_evt, node) => {
       if (!isSkillNode(node)) return;
-
+      let unlockedCurrent = false;
       setNodes((prevNodes) => {
         const current = prevNodes.find(
           (n): n is SkillNode => isSkillNode(n) && n.id === node.id,
@@ -489,6 +970,7 @@ export default function Flow() {
 
         if (!prerequisitesMet) return prevNodes;
 
+        unlockedCurrent = true;
         return prevNodes.map((n) => {
           if (!isSkillNode(n) || n.id !== node.id) return n;
           const d = n.data as SkillData;
@@ -498,8 +980,18 @@ export default function Flow() {
           } as SkillNode;
         });
       });
+      if (unlockedCurrent) {
+        void supabase
+          .from('skill_nodes')
+          .update({ unlocked: true })
+          .eq('id', node.id)
+          .then(() => {
+            const data = node.data as SkillData;
+            broadcastAction(`Unlocked "${data.name}"`);
+          });
+      }
     },
-    [edges, setNodes],
+    [edges, setNodes, broadcastAction],
   );
 
   /** Delete selected */
@@ -511,7 +1003,18 @@ export default function Flow() {
     deleteElements({ nodes: nodesToDelete, edges: edgesToDelete });
     setSelectedNodeIds([]);
     setSelectedEdgeIds([]);
-  }, [deleteElements, nodes, edges, selectedNodeIds, selectedEdgeIds]);
+    const nodeIds = nodesToDelete.map((n) => n.id);
+    const edgeIds = edgesToDelete.map((e) => e.id);
+    if (nodeIds.length > 0) {
+      void supabase.from('skill_nodes').delete().in('id', nodeIds);
+    }
+    if (edgeIds.length > 0) {
+      void supabase.from('skill_edges').delete().in('id', edgeIds);
+    }
+    if (nodesToDelete.length > 0 || edgesToDelete.length > 0) {
+      broadcastAction('Deleted selection');
+    }
+  }, [deleteElements, nodes, edges, selectedNodeIds, selectedEdgeIds, broadcastAction]);
 
   /** Detach selected nodes */
   const detachSelectedNodes = useCallback(() => {
@@ -523,7 +1026,53 @@ export default function Flow() {
           !selectedNodeIds.includes(e.target),
       ),
     );
-  }, [selectedNodeIds, setEdges]);
+    void supabase.from('skill_edges').delete().in('source', selectedNodeIds);
+    void supabase.from('skill_edges').delete().in('target', selectedNodeIds);
+    broadcastAction('Detached selected nodes');
+  }, [selectedNodeIds, setEdges, broadcastAction]);
+
+  const handleResetTree = useCallback(async () => {
+    setTreeLoading(true);
+    const { seededNodes, seededEdges } = buildSeedGraph();
+    setNodes(seededNodes);
+    setEdges(seededEdges);
+    try {
+      await supabase.from('skill_edges').delete().eq('tree_id', treeId);
+      await supabase.from('skill_nodes').delete().eq('tree_id', treeId);
+      const nodePayload = seededNodes.map((node) => {
+        const data = node.data as SkillData;
+        return {
+          id: node.id,
+          tree_id: treeId,
+          name: data.name,
+          description: data.description ?? null,
+          cost: data.cost ?? null,
+          level: data.level ?? null,
+          unlocked: data.unlocked ?? false,
+          position: node.position,
+        };
+      });
+      if (nodePayload.length > 0) {
+        await supabase.from('skill_nodes').insert(nodePayload);
+      }
+      if (seededEdges.length > 0) {
+        await supabase.from('skill_edges').insert(
+          seededEdges.map((edge) => ({
+            id: edge.id,
+            tree_id: treeId,
+            source: edge.source,
+            target: edge.target,
+            animated: edge.animated ?? true,
+          })),
+        );
+      }
+      broadcastAction('Reset tree to default nodes');
+    } catch {
+      toast.error('Failed to reset tree');
+    } finally {
+      setTreeLoading(false);
+    }
+  }, [treeId, broadcastAction]);
 
   const closeSidebarForMobile = () => {
     if (window.innerWidth <= 768) setSidebarOpen(false);
@@ -579,20 +1128,50 @@ export default function Flow() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  /** Ensure the app has hydrated before rendering the splash to prevent UI mismatches on render */
-  useEffect(() => {
-    const rafId = window.requestAnimationFrame(() => setHasHydrated(true));
-    return () => window.cancelAnimationFrame(rafId);
-  }, [setHasHydrated]);
+  const handlePointerMove = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      const flowPos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
+      sendCursorPosition(flowPos.x, flowPos.y);
+    },
+    [screenToFlowPosition, sendCursorPosition],
+  );
+
+  const handlePointerLeave = useCallback(() => {
+    const channel = presenceChannelRef.current;
+    if (!channel) return;
+    channel.send({
+      type: 'broadcast',
+      event: 'cursor-move',
+      payload: { id: clientId, hidden: true },
+    });
+  }, [clientId]);
 
   /** ---------- Layout & animated sidebar ---------- */
-  const splashCtaLabel =
-    hasHydrated && storageReady && hasExistingTree ? 'Continue with my tree' : undefined;
-  const showResetButton = hasHydrated && storageReady && hasExistingTree;
-  const splashLoading = !hasHydrated;
+
+  if (treeLoading) {
+    return (
+      <div className="flex h-full items-center justify-center text-white">Loading tree…</div>
+    );
+  }
+
+  if (treeError) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center text-white">
+        <p className="text-red-400">{treeError}</p>
+        <Link href="/" className="mt-4 rounded bg-white px-3 py-2 text-sm text-black">
+          Back home
+        </Link>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
+    <div
+      ref={canvasRef}
+      onMouseMove={handlePointerMove}
+      onMouseLeave={handlePointerLeave}
+      className="relative flex h-full w-full flex-col overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40"
+    >
       <div className="flex min-h-0 flex-1 w-full">
         {/* Sidebar as animated drawer */}
         <motion.div
@@ -606,6 +1185,10 @@ export default function Flow() {
         >
           {/* Sidebar content */}
           <SkillSidebar
+            treeId={treeId}
+            treeTitle={treeTitle}
+            canResetTree={hasExistingTree}
+            onResetTree={hasExistingTree ? handleResetTree : undefined}
             name={name}
             description={description}
             cost={cost}
@@ -633,6 +1216,7 @@ export default function Flow() {
             onDeleteSelected={deleteSelected}
             onDetachSelected={detachSelectedNodes}
             onToggleAutoConnect={setAutoConnect}
+            onOpenShareModal={() => setShareModalOpen(true)}
             onClose={() => setSidebarOpen(false)}
           />
         </motion.div>
@@ -690,6 +1274,36 @@ export default function Flow() {
           </ReactFlow>
         </div>
       </div>
+      <div className="pointer-events-none absolute inset-0 z-40">
+        {Object.values(remoteCursors).map((cursor) => {
+          if (typeof cursor.flowX !== 'number' || typeof cursor.flowY !== 'number') return null;
+          const { x: viewportX, y: viewportY, zoom } = getViewport();
+          const screenX = cursor.flowX * zoom + viewportX;
+          const screenY = cursor.flowY * zoom + viewportY;
+          return (
+            <div
+              key={cursor.id}
+              className="absolute -translate-x-1/2 -translate-y-full"
+              style={{ transform: `translate(${screenX}px, ${screenY}px)` }}
+            >
+              <div
+                className="rounded-full px-2 py-1 text-[11px] font-medium"
+                style={{
+                  backgroundColor: `${cursor.color}33`,
+                  color: cursor.color,
+                }}
+              >
+                {cursor.label}
+              </div>
+              {cursor.action && (
+                <div className="mt-1 rounded bg-black/70 px-2 py-1 text-[10px] text-white">
+                  {cursor.action}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
       <EditNodeModal
         visible={Boolean(editingNodeId)}
         name={editName}
@@ -704,23 +1318,78 @@ export default function Flow() {
         onSave={handleEditSave}
       />
       <ToastContainer position="bottom-right" autoClose={3200} pauseOnHover closeOnClick theme="dark" />
-      <Splash
-        visible={showSplash}
-        onStart={() => setShowSplash(false)}
-        ctaLabel={splashCtaLabel}
-        onReset={
-          showResetButton
-            ? () => {
-                setNodes(initialNodes);
-                setEdges(initialEdges);
-                window.localStorage.removeItem('skill-tree-nodes');
-                window.localStorage.removeItem('skill-tree-edges');
-                setShowSplash(false);
-              }
-            : undefined
-        }
-        loading={splashLoading}
-      />
+      {shareModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShareModalOpen(false)} />
+          <div className="relative z-10 w-full max-w-md rounded-2xl bg-zinc-900 p-6 text-white shadow-xl">
+            <h2 className="text-xl font-semibold">Share this tree</h2>
+            <p className="mt-1 text-sm text-white/70">Give collaborators the link and password (if set).</p>
+            <div className="mt-4">
+              <label className="text-xs uppercase text-white/60">Tree link</label>
+              <div className="mt-1 flex items-center gap-2 rounded border border-white/20 bg-black/30 px-3 py-2 text-sm">
+                <span className="flex-1 truncate font-mono">{shareLink}</span>
+                <button
+                  type="button"
+                  onClick={handleCopyShareLink}
+                  className="rounded bg-white/10 px-2 py-1 text-xs"
+                >
+                  {shareCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+            </div>
+            <div className="mt-4">
+              <label className="text-xs uppercase text-white/60">Tree ID</label>
+              <div className="mt-1 rounded border border-white/20 bg-black/30 px-3 py-2 font-mono text-sm">{treeId}</div>
+            </div>
+            <div className="mt-4">
+              <label className="text-xs uppercase text-white/60">Password</label>
+              <input
+                type="text"
+                value={newPasswordInput}
+                onChange={(e) => setNewPasswordInput(e.target.value)}
+                placeholder={hasTreePassword ? 'Enter new password to replace current' : 'Set optional password'}
+                className="mt-1 w-full rounded border border-white/20 bg-black/30 px-3 py-2 text-sm"
+              />
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handlePasswordUpdate}
+                  disabled={passwordSaving}
+                  className="rounded bg-white px-3 py-2 text-xs font-semibold text-black disabled:opacity-60"
+                >
+                  {passwordSaving ? 'Saving…' : hasTreePassword ? 'Update password' : 'Set password'}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRemovePassword}
+                  disabled={passwordSaving || !hasTreePassword}
+                  className="rounded border border-white/30 px-3 py-2 text-xs text-white/80 disabled:opacity-40"
+                >
+                  Remove password
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShareModalOpen(false)}
+                  className="ml-auto rounded border border-white/30 px-3 py-2 text-xs text-white/80"
+                >
+                  Close
+                </button>
+              </div>
+              {lastSharedPassword && (
+                <p className="mt-2 text-xs text-emerald-300">
+                  Share this password: <span className="font-mono">{lastSharedPassword}</span>
+                </p>
+              )}
+              {passwordMessage && <p className="mt-2 text-xs text-white/70">{passwordMessage}</p>}
+              {hasTreePassword && !lastSharedPassword && (
+                <p className="mt-2 text-xs text-amber-300">
+                  A password is already set. Enter a new one above if you need to share it with someone.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
