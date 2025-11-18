@@ -1,36 +1,51 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+
+type LocalStorageState<T> = {
+  value: T;
+  hadStoredValue: boolean;
+  initialized: boolean;
+};
 
 export function useLocalStorage<T>(key: string, initialValue: T) {
-  const hadStoredValueRef = useRef(false);
-  const initializedRef = useRef(false);
-
-  const [value, setValue] = useState<T>(() => {
-    if (typeof window === 'undefined') return initialValue;
+  const [state, setState] = useState<LocalStorageState<T>>(() => {
+    if (typeof window === 'undefined') {
+      return { value: initialValue, hadStoredValue: false, initialized: true };
+    }
     try {
       const stored = window.localStorage.getItem(key);
       if (stored !== null) {
-        hadStoredValueRef.current = true;
-        initializedRef.current = true;
-        return JSON.parse(stored) as T;
+        return {
+          value: JSON.parse(stored) as T,
+          hadStoredValue: true,
+          initialized: true,
+        };
       }
     } catch {
       // ignore parse errors
     }
-    hadStoredValueRef.current = false;
-    initializedRef.current = true;
-    return initialValue;
+    return { value: initialValue, hadStoredValue: false, initialized: true };
   });
+
+  const setValue = useCallback(
+    (updater: T | ((prev: T) => T)) => {
+      setState((prev) => {
+        const nextValue = typeof updater === 'function' ? (updater as (prev: T) => T)(prev.value) : updater;
+        return { ...prev, value: nextValue };
+      });
+    },
+    [],
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      window.localStorage.setItem(key, JSON.stringify(value));
+      window.localStorage.setItem(key, JSON.stringify(state.value));
     } catch {
       // ignore write errors (e.g. storage disabled)
     }
-  }, [key, value]);
+  }, [key, state.value]);
 
-  return [value, setValue, hadStoredValueRef.current, initializedRef.current] as const;
+  return [state.value, setValue, state.hadStoredValue, state.initialized] as const;
 }

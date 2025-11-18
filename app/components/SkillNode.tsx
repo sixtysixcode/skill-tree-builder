@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { Handle, NodeResizeControl, Position, type NodeProps } from '@xyflow/react';
 import type { SkillNode } from '../types/skillTypes';
 
-export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
+export function SkillNodeComponent({ data }: NodeProps<SkillNode>) {
   const {
     name,
     description,

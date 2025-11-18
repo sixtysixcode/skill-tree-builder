@@ -86,17 +86,20 @@ export default function Flow() {
   const { screenToFlowPosition, deleteElements } = useReactFlow<AppNode, AppEdge>();
 
   /** Reset a node to locked */
-  const resetNode = useCallback((id: string) => {
-    setNodes((prev) =>
-      prev.map((n) => {
-        if (!isSkillNode(n) || n.id !== id) return n;
-        return {
-          ...n,
-          data: { ...(n.data as SkillData), unlocked: false },
-        } as SkillNode;
-      }),
-    );
-  }, []);
+  const resetNode = useCallback(
+    (id: string) => {
+      setNodes((prev) =>
+        prev.map((n) => {
+          if (!isSkillNode(n) || n.id !== id) return n;
+          return {
+            ...n,
+            data: { ...(n.data as SkillData), unlocked: false },
+          } as SkillNode;
+        }),
+      );
+    },
+    [setNodes],
+  );
 
   const searchInfo = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -216,12 +219,12 @@ export default function Flow() {
   /** Changes (typed) */
   const onNodesChange: OnNodesChange<AppNode> = useCallback(
     (changes) => setNodes((nds) => applyNodeChanges<AppNode>(changes, nds)),
-    [],
+    [setNodes],
   );
 
   const onEdgesChange: OnEdgesChange<AppEdge> = useCallback(
     (changes) => setEdges((eds) => applyEdgeChanges<AppEdge>(changes, eds)),
-    [],
+    [setEdges],
   );
 
   const wouldCreateCycle = useCallback(
@@ -274,7 +277,7 @@ export default function Flow() {
       );
       return true;
     },
-    [wouldCreateCycle],
+    [wouldCreateCycle, setEdges],
   );
 
   const onConnect: OnConnect = useCallback(
@@ -288,7 +291,7 @@ export default function Flow() {
     (oldEdge: AppEdge, newConnection: Connection) => {
       setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
     },
-    [],
+    [setEdges],
   );
 
   const startEditNode = useCallback(
@@ -353,27 +356,6 @@ export default function Flow() {
     setEditingNodeId(null);
   }, [editingNodeId, editName, editDescription, editCost, editLevel, resetNode, setNodes, startEditNode]);
 
-  useEffect(() => {
-    if (!editingNodeId) return;
-    const node = nodes.find(
-      (n): n is SkillNode => isSkillNode(n) && n.id === editingNodeId,
-    );
-    if (!node) return;
-    const data = node.data as SkillData;
-    setEditName(data.name ?? '');
-    setEditDescription(data.description ?? '');
-    setEditCost(
-      typeof data.cost === 'number' && Number.isFinite(data.cost)
-        ? String(data.cost)
-        : '',
-    );
-    setEditLevel(
-      typeof data.level === 'number' && Number.isFinite(data.level)
-        ? String(data.level)
-        : '',
-    );
-  }, [editingNodeId, nodes]);
-
   /** Build new node (starts locked) */
   const buildNode = useCallback(
     (position: { x: number; y: number }): SkillNode => {
@@ -434,7 +416,7 @@ export default function Flow() {
       }
       setPlaceMode(false);
     },
-    [placeMode, screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely],
+    [placeMode, screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely, setNodes, setPlaceMode],
   );
 
   /** Add at center */
@@ -464,7 +446,7 @@ export default function Flow() {
         animated: true,
       });
     }
-  }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely]);
+  }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely, setNodes]);
 
   /** Selection handler (typed) */
   const onSelectionChange = useCallback(
@@ -475,7 +457,7 @@ export default function Flow() {
       setSelectedNodeIds((prev) => (shallowEqual(prev, nodeIds) ? prev : nodeIds));
       setSelectedEdgeIds((prev) => (shallowEqual(prev, edgeIds) ? prev : edgeIds));
     },
-    [],
+    [setSelectedNodeIds, setSelectedEdgeIds],
   );
 
   /** Unlock on node click if prerequisites met */
@@ -517,7 +499,7 @@ export default function Flow() {
         });
       });
     },
-    [edges],
+    [edges, setNodes],
   );
 
   /** Delete selected */
@@ -541,7 +523,7 @@ export default function Flow() {
           !selectedNodeIds.includes(e.target),
       ),
     );
-  }, [selectedNodeIds]);
+  }, [selectedNodeIds, setEdges]);
 
   const closeSidebarForMobile = () => {
     if (window.innerWidth <= 768) setSidebarOpen(false);
@@ -599,8 +581,9 @@ export default function Flow() {
 
   /** Ensure the app has hydrated before rendering the splash to prevent UI mismatches on render */
   useEffect(() => {
-    setHasHydrated(true);
-  }, []);
+    const rafId = window.requestAnimationFrame(() => setHasHydrated(true));
+    return () => window.cancelAnimationFrame(rafId);
+  }, [setHasHydrated]);
 
   /** ---------- Layout & animated sidebar ---------- */
   const splashCtaLabel =
