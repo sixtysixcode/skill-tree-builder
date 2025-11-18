@@ -42,8 +42,8 @@ const initialNodes: AppNode[] = [
     type: 'skill',
     position: { x: 40, y: 40 },
     data: {
-      name: 'Slash',
-      description: 'Basic melee attack',
+      name: 'HTML',
+      description: 'HyperText Markup Language',
       cost: 1,
       level: 1,
       unlocked: true,
@@ -56,8 +56,8 @@ const initialNodes: AppNode[] = [
     type: 'skill',
     position: { x: 280, y: 120 },
     data: {
-      name: 'Cleave',
-      description: 'Arc attack hits multiple foes',
+      name: 'CSS',
+      description: 'Cascading Style Sheets',
       unlocked: false,
     } as SkillData,
     sourcePosition: Position.Right,
@@ -84,9 +84,9 @@ function shallowEqualIds(a: string[], b: string[]) {
 
 export default function Flow() {
   /** ---------- Seed graph ---------- */
-  const [nodes, setNodes, hadStoredNodes] = useLocalStorage<AppNode[]>('skill-tree-nodes', initialNodes);
+  const [nodes, setNodes, hadStoredNodes, nodesInitialized] = useLocalStorage<AppNode[]>('skill-tree-nodes', initialNodes);
 
-  const [edges, setEdges, hadStoredEdges] = useLocalStorage<AppEdge[]>('skill-tree-edges', initialEdges);
+  const [edges, setEdges, hadStoredEdges, edgesInitialized] = useLocalStorage<AppEdge[]>('skill-tree-edges', initialEdges);
 
   /** Form / UX */
   const [name, setName] = useState('');
@@ -99,6 +99,7 @@ export default function Flow() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showSplash, setShowSplash] = useState(true);
   const [hasHydrated, setHasHydrated] = useState(false);
+  const storageReady = nodesInitialized && edgesInitialized;
   const hasExistingTree = hadStoredNodes || hadStoredEdges;
 
   /** Selection */
@@ -376,9 +377,7 @@ export default function Flow() {
         id,
         type: 'skill',
         position,
-        data: {
-          ...data,
-        },
+        data,
         sourcePosition: Position.Right,
         targetPosition: Position.Left,
       } as SkillNode;
@@ -539,7 +538,10 @@ export default function Flow() {
   }, []);
 
   /** ---------- Layout & animated sidebar ---------- */
-  const splashCtaLabel = hasHydrated && hasExistingTree ? 'Continue with my tree' : undefined;
+  const splashCtaLabel =
+    hasHydrated && storageReady && hasExistingTree ? 'Continue with my tree' : undefined;
+  const showResetButton = hasHydrated && storageReady && hasExistingTree;
+  const splashLoading = !hasHydrated;
 
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-white/80 text-black dark:bg-zinc-900/40">
@@ -647,6 +649,18 @@ export default function Flow() {
         visible={showSplash}
         onStart={() => setShowSplash(false)}
         ctaLabel={splashCtaLabel}
+        onReset={
+          showResetButton
+            ? () => {
+                setNodes(initialNodes);
+                setEdges(initialEdges);
+                window.localStorage.removeItem('skill-tree-nodes');
+                window.localStorage.removeItem('skill-tree-edges');
+                setShowSplash(false);
+              }
+            : undefined
+        }
+        loading={splashLoading}
       />
     </div>
   );

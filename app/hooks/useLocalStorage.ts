@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 
 export function useLocalStorage<T>(key: string, initialValue: T) {
   const hadStoredValueRef = useRef(false);
+  const initializedRef = useRef(false);
 
   const [value, setValue] = useState<T>(() => {
     if (typeof window === 'undefined') return initialValue;
@@ -11,12 +12,14 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
       const stored = window.localStorage.getItem(key);
       if (stored !== null) {
         hadStoredValueRef.current = true;
+        initializedRef.current = true;
         return JSON.parse(stored) as T;
       }
     } catch {
       // ignore parse errors
     }
     hadStoredValueRef.current = false;
+    initializedRef.current = true;
     return initialValue;
   });
 
@@ -29,5 +32,5 @@ export function useLocalStorage<T>(key: string, initialValue: T) {
     }
   }, [key, value]);
 
-  return [value, setValue, hadStoredValueRef.current] as const;
+  return [value, setValue, hadStoredValueRef.current, initializedRef.current] as const;
 }
