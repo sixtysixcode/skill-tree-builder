@@ -36,7 +36,7 @@ export function EditNodeModal({
         <p className="mt-1 text-sm text-zinc-500">Update the details for this node.</p>
         <div className="mt-4 space-y-3">
           <div>
-            <label className="text-xs uppercase tracking-wide text-zinc-500">Name</label>
+            <label className="text-xs tracking-wide text-zinc-500">Name</label>
             <input
               className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm"
               value={name}
@@ -44,7 +44,7 @@ export function EditNodeModal({
             />
           </div>
           <div>
-            <label className="text-xs uppercase tracking-wide text-zinc-500">Description</label>
+            <label className="text-xs tracking-wide text-zinc-500">Description</label>
             <textarea
               className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm"
               value={description}
@@ -54,7 +54,7 @@ export function EditNodeModal({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs uppercase tracking-wide text-zinc-500">Cost</label>
+              <label className="text-xs tracking-wide text-zinc-500">Cost</label>
               <input
                 className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm"
                 value={cost}
@@ -62,7 +62,7 @@ export function EditNodeModal({
               />
             </div>
             <div>
-              <label className="text-xs uppercase tracking-wide text-zinc-500">Level</label>
+              <label className="text-xs tracking-wide text-zinc-500">Level</label>
               <input
                 className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm"
                 value={level}

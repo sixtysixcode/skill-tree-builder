@@ -11,7 +11,7 @@ type SplashProps = {
 
 export function Splash({
   title = 'Skill Tree Builder',
-  description = 'Create detailed skill trees for any subject.',
+  description = 'Create detailed skill trees for any subject',
   author = 'Made by Alex Barnes',
   ctaLabel = 'Start building my tree',
   onStart,

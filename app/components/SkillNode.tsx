@@ -57,7 +57,7 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
               e.stopPropagation();
               onEdit?.();
             }}
-            className="rounded-[2px] bg-white/80 px-1.5 py-0.5 text-[8px] font-semibold text-zinc-800 shadow"
+            className="rounded-[2px] bg-white/80 px-1.5 py-1 text-[8px] text-zinc-800 shadow leading-none"
           >
             Edit
           </button>
@@ -68,7 +68,7 @@ export function SkillNodeComponent({ data, id }: NodeProps<SkillNode>) {
               onReset?.();
             }}
             className="
-              text-[8px] px-1.5 py-0.5
+              text-[8px] px-1.5 py-1
               bg-red-600 text-white rounded-[2px] shadow leading-none
             "
           >
