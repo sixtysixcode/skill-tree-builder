@@ -590,8 +590,6 @@ export default function Flow() {
     );
   }, [selectedNodeIds]);
 
-  const canSubmit = useMemo(() => name.trim().length > 0 && description.trim().length > 0, [name, description]);
-
   const closeSidebarForMobile = () => {
     if (window.innerWidth <= 768) setSidebarOpen(false);
   };
@@ -677,15 +675,14 @@ export default function Flow() {
             searchQuery={searchTerm}
             placeMode={placeMode}
             autoConnect={autoConnect}
-            canSubmit={canSubmit}
             hasSelection={
               selectedNodeIds.length > 0 || selectedEdgeIds.length > 0
             }
             hasSelectedNodes={selectedNodeIds.length > 0}
             onNameChange={setName}
             onDescriptionChange={setDescription}
-            onCostChange={(v: string) => setCost(v.replace(/[^0-9]/g, ''))}
-            onLevelChange={(v: string) => setLevel(v.replace(/[^0-9]/g, ''))}
+            onCostChange={setCost}
+            onLevelChange={setLevel}
             onSearchChange={setSearchTerm}
             onTogglePlaceMode={() => {
               closeSidebarForMobile();
@@ -698,7 +695,6 @@ export default function Flow() {
             onDeleteSelected={deleteSelected}
             onDetachSelected={detachSelectedNodes}
             onToggleAutoConnect={setAutoConnect}
-            closeSidebarForMobile={closeSidebarForMobile}
             onClose={() => setSidebarOpen(false)}
           />
         </motion.div>
