@@ -21,7 +21,7 @@ yarn build && yarn start   # production build + serve
 ### Application Overview
 
 - **Canvas (`app/components/Flow.tsx`)**  
-  Uses `ReactFlow` to render nodes/edges, manage selections, and coordinate placement, deletion, reconnection, and cycle detection. Also orchestrates search highlighting and onboarding state.
+  Uses `ReactFlow` to render nodes/edges, manage selections, and coordinate placement, deletion, reconnection, and cycle detection. Also orchestrates search highlighting and Supabase persistence.
 
 - **Sidebar (`app/components/SkillSidebar.tsx`)**  
   Validated form for creating skills, toggling placement mode, triggering center placement, auto-connect, and search. Includes actions for detaching or deleting selected elements.
@@ -29,11 +29,11 @@ yarn build && yarn start   # production build + serve
 - **Skill nodes (`app/components/SkillNode.tsx`)**  
   Custom React Flow node renderer that shows skill metadata, status, and quick actions (edit/reset). Receives typed data via `SkillData` from `app/types/skillTypes.ts`.
 
-- **Persistence (`app/hooks/useLocalStorage.ts`)**  
-  Hydrates nodes and edges from `localStorage` so sessions survive refreshes. Flow seeds defaults and keeps refs synchronized.
+- **Data + realtime**  
+  Supabase stores trees/nodes/edges and broadcasts changes so multiple users can work on a shared tree.
 
-- **Modals & Splash (`app/components/EditNodeModal.tsx`, `app/components/Splash.tsx`)**  
-  Modal edits an existing node’s fields; splash screen offers the user the choice between starting a new tree or resuming an existing one (if data exists in localstorage).
+- **Modals (`app/components/EditNodeModal.tsx`)**  
+  Modal edits an existing node’s fields directly on the canvas.
 
 - **Utilities & Constants**  
   - `app/constants/canvasConstants.ts`: shared layout dimensions and style defaults.  
@@ -43,7 +43,7 @@ yarn build && yarn start   # production build + serve
 
 ```
 app/
-├─ components/    # Flow, sidebar, splash, node renderer, modal
+├─ components/    # Flow, sidebar, node renderer, modal
 ├─ constants/     # Canvas/graph constants
 ├─ hooks/         # Custom hooks (e.g., local storage sync)
 ├─ types/         # TypeScript definitions for nodes/edges/skills
@@ -59,13 +59,17 @@ app/
 - Automatically connect new skills to the currently selected node when auto-connect is enabled.
 - Prevent circular dependencies through cycle detection before edges are created (Displays toast error).
 - Search by name or description to highlight matching nodes and their prerequisite path.
-- Edit or reset any skill via the modal, with data stored in local storage for persistence.
+- Edit or reset any skill via the modal, with data stored in Supabase for persistence.
 - Responsive sidebar drawer that adapts to mobile layouts.
 
 
 ### Bonuses
 - Handled prevention of circular dependencies using `wouldCreateCycle` function inside Flow.tsx. Display Toast error notification.
 - Added node search functionality with search bar inside SkillSidebar.tsx. Finds nodes with name/description matching search query, highlights nodes with an orange border and highlights tree path to matching node.
+- If a primary node is active and a new node (inactive) is connected (becoming the primary node) the active node (now secondary) is automatically reverted to inactive.
+- Created a database on Supabase to store tree, skill_node and skill_edge's. 
+- Used Supabase Realtime to display collaborator mouse position, node creation, editing and deletion.
+- When a new tree is created the user can set a password which can be shared with collaborators for security.
 
 ### AI Usage
 - Used to scaffold initial components, define types and write unit tests. All AI generated code reviewed and refactored where necessary.
