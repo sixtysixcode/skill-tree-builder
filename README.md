@@ -62,6 +62,14 @@ app/
 - Edit or reset any skill via the modal, with data stored in local storage for persistence.
 - Responsive sidebar drawer that adapts to mobile layouts.
 
+
+### Bonuses
+- Handled prevention of circular dependencies using `wouldCreateCycle` function inside Flow.tsx. Display Toast error notification.
+- Added node search functionality with search bar inside SkillSidebar.tsx. Finds nodes with name/description matching search query, highlights nodes with an orange border and highlights tree path to matching node.
+
+### AI Usage
+- Used to scaffold initial components, define types and write unit tests. All AI generated code reviewed and refactored where necessary.
+
 ### Contributing Notes
 
 - Use Yarn to avoid conflicting lockfiles.
