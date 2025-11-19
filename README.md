@@ -71,8 +71,16 @@ app/
 - Used Supabase Realtime to display collaborator mouse position, node creation, editing and deletion.
 - When a new tree is created the user can set a password which can be shared with collaborators for security.
 
+### Collaboration & Realtime Sync
+- **Supabase Channels:** `tree-updates:{treeId}` streams Postgres changes for `skill_nodes` and `skill_edges`, allowing every client to patch React Flow state incrementally. `tree-presence:{treeId}` tracks active collaborators and broadcasts cursor positions + action messages.  
+- **Cursor Broadcasts:** Flow throttles pointer moves and node drag updates (`sendCursorPosition`, `sendNodePosition`) so remote users see live intent without spamming the channel. Remote cursors are rendered in an overlay synced with the viewport/zoom.  
+- **Optimistic UI:** Node edits, unlocks, and resets update state immediately while invoking `supabase.update(...)`. Incoming realtime events run through helpers (`mergeNodeRow`, `ensureNodeBehavior`) to preserve local position/handlers even when Supabase omits columns.  
+- **Shared Tree Security:** The share modal lets the owner copy a tree URL, view the ID, and manage an optional password. Password hashes live on the `trees` table, and new collaborators must supply it before Supabase data loads.  
+- **Cross-client notifications:** Actions such as locking/unlocking or resetting nodes call `broadcastAction`, so collaborators see inline status pills below remote cursors and know when data changed.  
+- **Debounced metadata:** Tree title updates are debounced in Flow and persisted to Supabase, so everyone sees the new name without jitter and without clobbering positions during the update broadcast.
+
 ### AI Usage
-- Used to scaffold initial components, define types and write unit tests. All AI generated code reviewed and refactored where necessary.
+- Used to scaffold initial components, help with Supabase Realtime implementation, define types and write unit tests. All AI generated code reviewed and refactored where necessary.
 
 ### Contributing Notes
 

@@ -30,110 +30,20 @@ import 'react-toastify/dist/ReactToastify.css';
 import { nodeTypes } from './SkillNode';
 import { SkillSidebar } from './SkillSidebar';
 import { EditNodeModal } from './EditNodeModal';
-import type { SkillNode, SkillData, AppNode, AppEdge } from '../types/skillTypes';
-import { shallowEqual, isSkillNode } from '../utils/helpers';
-import { CYCLE_ERROR_MESSAGE, DEFAULT_EDGE_OPTIONS, DEFAULT_NODE_STYLE, DELETE_KEYS, initialEdges, initialNodes } from '../constants/canvasConstants';
+import { ShareTreeModal } from './ShareTreeModal';
+import type { SkillNode, SkillData, AppNode, AppEdge, FlowProps, EdgeConnection, RemoteCursor, SkillEdgeRow, SkillNodeRow } from '../types/skillTypes';
+import { shallowEqual, isSkillNode, generateId, mapNodeRow, buildSeedGraph, mapEdgeRow } from '../utils/helpers';
+import { computeSearchInfo, graphWouldCreateCycle } from '../utils/graphHelpers';
+import { CURSOR_COLORS, CYCLE_ERROR_MESSAGE, DEFAULT_EDGE_OPTIONS, DEFAULT_NODE_STYLE, DELETE_KEYS } from '../constants/canvasConstants';
 import { supabase } from '../lib/supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
-
-type EdgeConnection = Connection & Partial<Pick<AppEdge, 'id' | 'animated'>>;
-
-type FlowProps = {
-  treeId: string;
-};
-
-type SkillNodeRow = {
-  id: string;
-  tree_id: string;
-  name: string;
-  description: string | null;
-  cost: number | null;
-  level: number | null;
-  unlocked: boolean;
-  position: { x: number; y: number } | null;
-};
-
-type SkillEdgeRow = {
-  id: string;
-  tree_id: string;
-  source: string;
-  target: string;
-  animated: boolean | null;
-};
-
-type RemoteCursor = {
-  id: string;
-  flowX?: number;
-  flowY?: number;
-  color: string;
-  label: string;
-  lastUpdated: number;
-  action?: string;
-};
-
-const generateId = () => {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2);
-};
-
-const mapNodeRow = (row: SkillNodeRow): SkillNode =>
-  ({
-    id: row.id,
-    type: 'skill',
-    position: row.position ?? { x: 0, y: 0 },
-    data: {
-      name: row.name,
-      description: row.description ?? undefined,
-      cost: row.cost ?? undefined,
-      level: row.level ?? undefined,
-      unlocked: row.unlocked,
-    },
-    sourcePosition: Position.Right,
-    targetPosition: Position.Left,
-    style: { ...DEFAULT_NODE_STYLE },
-  }) as SkillNode;
-
-const mapEdgeRow = (row: SkillEdgeRow): AppEdge => ({
-  id: row.id,
-  source: row.source,
-  target: row.target,
-  animated: row.animated ?? true,
-});
-
-const buildSeedGraph = () => {
-  const idMap = new Map<string, string>();
-  const seededNodes = initialNodes.map((node) => {
-    const newId = generateId();
-    idMap.set(node.id, newId);
-    const data = node.data as SkillData;
-    return {
-      ...node,
-      id: newId,
-      data: {
-        ...data,
-        unlocked: Boolean(data.unlocked),
-      },
-    } as SkillNode;
-  });
-
-  const seededEdges = initialEdges.map((edge) => ({
-    id: generateId(),
-    source: idMap.get(edge.source) ?? edge.source,
-    target: idMap.get(edge.target) ?? edge.target,
-    animated: edge.animated,
-  }));
-
-  return { seededNodes, seededEdges };
-};
-
-const CURSOR_COLORS = ['#f97316', '#22d3ee', '#a855f7', '#facc15', '#34d399', '#fb7185', '#60a5fa'];
 
 export default function Flow({ treeId }: FlowProps) {
   /** ---------- Seed graph ---------- */
   const [nodes, setNodes] = useState<AppNode[]>([]);
   const [edges, setEdges] = useState<AppEdge[]>([]);
+  const nodesRef = useRef<AppNode[]>([]);
+  const edgesRef = useRef<AppEdge[]>([]);
   const [treeLoading, setTreeLoading] = useState(true);
   const [treeError, setTreeError] = useState<string | null>(null);
   const [hasExistingTree, setHasExistingTree] = useState(false);
@@ -153,6 +63,7 @@ export default function Flow({ treeId }: FlowProps) {
   const [editCost, setEditCost] = useState('');
   const [editLevel, setEditLevel] = useState('');
   const [treeTitle, setTreeTitle] = useState<string>('Skill Tree');
+  const titleSaveTimeout = useRef<NodeJS.Timeout | null>(null);
   const [hasTreePassword, setHasTreePassword] = useState(false);
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
@@ -178,6 +89,7 @@ export default function Flow({ treeId }: FlowProps) {
   const displayName = useMemo(() => `User ${clientId.slice(-4)}`, [clientId]);
   const isMountedRef = useRef(true);
 
+  // Track whether the component is still mounted to avoid state updates post-unmount.
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -185,8 +97,38 @@ export default function Flow({ treeId }: FlowProps) {
     };
   }, []);
 
+  // Keep refs in sync so callbacks can read the latest nodes without re-subscribing.
+  useEffect(() => {
+    nodesRef.current = nodes;
+  }, [nodes]);
+
+  // Same for edges to power graph helpers without extra dependencies.
+  useEffect(() => {
+    edgesRef.current = edges;
+  }, [edges]);
+
+  // Fetch the freshest copy of a skill node without triggering rerenders.
+  const findSkillNode = useCallback(
+    (id: string) => nodesRef.current.find((n): n is SkillNode => isSkillNode(n) && n.id === id),
+    [],
+  );
+
+  // Write changes to Supabase while ensuring position sticks unless explicitly overwritten.
+  const persistNodeUpdate = useCallback(
+    (id: string, changes: Record<string, unknown>) => {
+      const existing = findSkillNode(id);
+      const payload = { ...changes };
+      if (!('position' in payload) && existing?.position) {
+        payload.position = existing.position;
+      }
+      return supabase.from('skill_nodes').update(payload).eq('id', id);
+    },
+    [findSkillNode],
+  );
+
   const shareLink = typeof window !== 'undefined' ? `${window.location.origin}/tree/${treeId}` : '';
 
+  // Copy the share link to the clipboard and give quick visual feedback.
   const handleCopyShareLink = async () => {
     try {
       await navigator.clipboard.writeText(shareLink);
@@ -197,6 +139,7 @@ export default function Flow({ treeId }: FlowProps) {
     }
   };
 
+  // Persist a password change for the current tree.
   const handlePasswordUpdate = async () => {
     if (!newPasswordInput.trim()) {
       setPasswordMessage('Enter a password before saving.');
@@ -223,6 +166,7 @@ export default function Flow({ treeId }: FlowProps) {
     }
   };
 
+  // Broadcast the user cursor position with a small throttle.
   const sendCursorPosition = useCallback(
     (flowX: number, flowY: number) => {
       const channel = presenceChannelRef.current;
@@ -239,6 +183,7 @@ export default function Flow({ treeId }: FlowProps) {
     [clientId, displayName, userColor],
   );
 
+  // Push live node position updates to collaborators while dragging.
   const sendNodePosition = useCallback(
     (nodeId: string, position: { x: number; y: number }) => {
       const channel = presenceChannelRef.current;
@@ -256,6 +201,7 @@ export default function Flow({ treeId }: FlowProps) {
     [clientId],
   );
 
+  // Send high-level notifications (reset, unlock, etc.) to collaborators.
   const broadcastAction = useCallback(
     (message: string, options?: { refetch?: boolean }) => {
       const channel = presenceChannelRef.current;
@@ -269,6 +215,7 @@ export default function Flow({ treeId }: FlowProps) {
     [clientId],
   );
 
+  // Remove any stored password, effectively making the tree public.
   const handleRemovePassword = async () => {
     setPasswordSaving(true);
     setPasswordMessage(null);
@@ -289,8 +236,9 @@ export default function Flow({ treeId }: FlowProps) {
     }
   };
 
-   /** Reset a node to locked */
-   const resetNode = useCallback(
+  /** Reset a node to locked */
+  // Flip the unlocked flag locally and remotely (optionally silently).
+  const resetNode = useCallback(
     (id: string, options?: { silent?: boolean; reason?: string }) => {
       let changed = false;
       let nodeName: string | undefined;
@@ -308,39 +256,125 @@ export default function Flow({ treeId }: FlowProps) {
         }),
       );
       if (!changed) return;
-      void supabase.from('skill_nodes').update({ unlocked: false }).eq('id', id);
+      void persistNodeUpdate(id, { unlocked: false });
       if (!options?.silent) {
         broadcastAction(options?.reason ?? `Locked "${nodeName ?? 'Skill'}"`);
       }
     },
-    [setNodes, broadcastAction],
+    [setNodes, broadcastAction, persistNodeUpdate],
   );
 
+  // When prerequisite nodes get locked, ensure dependent nodes relock too.
   const lockNodeIfPrereqsMissing = useCallback(
     (nodeId: string, incomingOverride?: Array<{ source: string }>) => {
-      const node = nodes.find((n): n is SkillNode => isSkillNode(n) && n.id === nodeId);
+      const node = nodesRef.current.find((n): n is SkillNode => isSkillNode(n) && n.id === nodeId);
       if (!node) return;
       const data = node.data as SkillData;
       if (!data.unlocked) return;
       const incoming =
         incomingOverride ??
-        edges.filter((edge) => edge.target === nodeId).map((edge) => ({ source: edge.source }));
+        edgesRef.current.filter((edge) => edge.target === nodeId).map((edge) => ({ source: edge.source }));
       if (incoming.length === 0) return;
       const prerequisitesMet = incoming.every((edge) => {
-        const prereq = nodes.find((n): n is SkillNode => isSkillNode(n) && n.id === edge.source);
+        const prereq = nodesRef.current.find((n): n is SkillNode => isSkillNode(n) && n.id === edge.source);
         return prereq ? (prereq.data as SkillData).unlocked : false;
       });
       if (!prerequisitesMet) {
         resetNode(nodeId, { silent: true });
       }
     },
-    [nodes, edges, resetNode],
+    [resetNode],
   );
 
+  // Populate the edit modal fields for the given node.
+  const startEditNode = useCallback((id: string) => {
+    const node = findSkillNode(id);
+    if (!node) return;
+    const data = node.data as SkillData;
+    setEditName(data.name ?? '');
+    setEditDescription(data.description ?? '');
+    setEditCost(
+      typeof data.cost === 'number' && Number.isFinite(data.cost)
+        ? String(data.cost)
+        : '',
+    );
+    setEditLevel(
+      typeof data.level === 'number' && Number.isFinite(data.level)
+        ? String(data.level)
+        : '',
+    );
+    setEditingNodeId(id);
+  }, [findSkillNode]);
+
+  // Guarantee each node has the handlers + sizing ReactFlow expects.
+  const ensureNodeBehavior = useCallback(
+    (node: AppNode): AppNode => {
+      if (!isSkillNode(node)) return node;
+      const data = node.data as SkillData;
+      let dataChanged = false;
+      const nextData = { ...data };
+      if (typeof data.onReset !== 'function') {
+        nextData.onReset = () => resetNode(node.id);
+        dataChanged = true;
+      }
+      if (typeof data.onEdit !== 'function') {
+        nextData.onEdit = () => startEditNode(node.id);
+        dataChanged = true;
+      }
+      let styleChanged = false;
+      const nextStyle = { ...(node.style ?? {}) };
+      if (typeof nextStyle.width !== 'number') {
+        nextStyle.width = DEFAULT_NODE_STYLE.width;
+        styleChanged = true;
+      }
+      if (typeof nextStyle.minHeight !== 'number') {
+        nextStyle.minHeight = DEFAULT_NODE_STYLE.minHeight;
+        styleChanged = true;
+      }
+      if (!dataChanged && !styleChanged) return node;
+      return {
+        ...node,
+        data: dataChanged ? nextData : data,
+        style: styleChanged ? nextStyle : node.style,
+      } as SkillNode;
+    },
+    [resetNode, startEditNode],
+  );
+
+  // Merge a realtime DB row into an existing node while preserving position.
+  const mergeNodeRow = useCallback(
+    (node: AppNode, row: SkillNodeRow, fallbackPosition?: { x: number; y: number } | null): AppNode => {
+      if (!isSkillNode(node)) return node;
+      const data = node.data as SkillData;
+      const merged = {
+        ...node,
+        position: row.position ?? fallbackPosition ?? node.position,
+        data: {
+          ...data,
+          name: row.name,
+          description: row.description ?? undefined,
+          cost: row.cost ?? undefined,
+          level: row.level ?? undefined,
+          unlocked: row.unlocked,
+        },
+      } as SkillNode;
+      return ensureNodeBehavior(merged);
+    },
+    [ensureNodeBehavior],
+  );
+
+  // Normalize an entire node list after loading from Supabase.
+  const decorateNodes = useCallback(
+    (list: AppNode[]) => list.map(ensureNodeBehavior),
+    [ensureNodeBehavior],
+  );
+
+  // Track whether we have any nodes/edges; used for Reset button state.
   useEffect(() => {
     setHasExistingTree(nodes.length > 0 || edges.length > 0);
   }, [nodes, edges]);
 
+  // Listen for realtime changes to nodes/edges coming from Supabase.
   useEffect(() => {
     const channel = supabase.channel(`tree-updates:${treeId}`, {
       config: { broadcast: { ack: false } },
@@ -351,11 +385,15 @@ export default function Flow({ treeId }: FlowProps) {
         if (payload.eventType === 'INSERT' && payload.new) {
           setNodes((prev) => {
             if (prev.some((n) => n.id === payload.new.id)) return prev;
-            return prev.concat(mapNodeRow(payload.new as SkillNodeRow));
+            return prev.concat(ensureNodeBehavior(mapNodeRow(payload.new as SkillNodeRow)));
           });
         } else if (payload.eventType === 'UPDATE' && payload.new) {
           setNodes((prev) =>
-            prev.map((node) => (node.id === payload.new.id ? mapNodeRow(payload.new as SkillNodeRow) : node)),
+            prev.map((node) =>
+              node.id === payload.new.id
+                ? mergeNodeRow(node, payload.new as SkillNodeRow, (payload.old as SkillNodeRow | undefined)?.position)
+                : node,
+            ),
           );
         } else if (payload.eventType === 'DELETE' && payload.old) {
           setNodes((prev) => prev.filter((node) => node.id !== payload.old.id));
@@ -394,8 +432,9 @@ export default function Flow({ treeId }: FlowProps) {
       supabase.removeChannel(channel);
       changeChannelRef.current = null;
     };
-  }, [treeId, lockNodeIfPrereqsMissing]);
+  }, [treeId, lockNodeIfPrereqsMissing, ensureNodeBehavior, mergeNodeRow]);
 
+  // Periodically prune stale remote cursor markers.
   useEffect(() => {
     const interval = window.setInterval(() => {
       const now = Date.now();
@@ -415,6 +454,7 @@ export default function Flow({ treeId }: FlowProps) {
     return () => window.clearInterval(interval);
   }, []);
 
+  // Load nodes/edges/password state for the current tree.
   const fetchTreeData = useCallback(
     async (options?: { silent?: boolean }) => {
       const silent = options?.silent ?? false;
@@ -438,20 +478,44 @@ export default function Flow({ treeId }: FlowProps) {
         if (!silent) setTreeLoading(false);
         return;
       }
-      const mappedNodes = (nodesResult.data as SkillNodeRow[]).map(mapNodeRow);
+      const mappedNodes = (nodesResult.data as SkillNodeRow[]).map((row) => mapNodeRow(row));
       const mappedEdges = (edgesResult.data as SkillEdgeRow[]).map(mapEdgeRow);
-      setNodes(mappedNodes);
+      setNodes(decorateNodes(mappedNodes));
       setEdges(mappedEdges);
       setHasExistingTree(mappedNodes.length > 0 || mappedEdges.length > 0);
       if (!silent) setTreeLoading(false);
     },
-    [treeId],
+    [treeId, decorateNodes],
   );
 
+  // Fetch the initial tree data once we have a treeId.
   useEffect(() => {
     fetchTreeData();
   }, [fetchTreeData]);
 
+  // Debounce and persist tree title changes to Supabase.
+  const persistTreeTitle = useCallback(
+    (nextTitle: string) => {
+      setTreeTitle(nextTitle);
+      if (titleSaveTimeout.current) {
+        clearTimeout(titleSaveTimeout.current);
+      }
+      titleSaveTimeout.current = setTimeout(() => {
+        supabase
+          .from('trees')
+          .update({ title: nextTitle.trim() || 'Skill Tree' })
+          .eq('id', treeId)
+          .then(({ error }) => {
+            if (error) {
+              toast.error('Failed to save tree title');
+            }
+          });
+      }, 500);
+    },
+    [treeId],
+  );
+
+  // Join the Supabase presence channel to show collaborator cursors.
   useEffect(() => {
     const channel = supabase.channel(`tree-presence:${treeId}`, {
       config: { presence: { key: clientId } },
@@ -556,68 +620,13 @@ export default function Flow({ treeId }: FlowProps) {
     };
   }, [treeId, clientId, displayName, userColor, fetchTreeData]);
 
-  const searchInfo = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-    if (!query) {
-      return {
-        query,
-        matchedNodeIds: new Set<string>(),
-        pathNodeIds: new Set<string>(),
-        pathEdgeIds: new Set<string>(),
-      };
-    }
-
-    /** Find nodes with name/description that matches the search query */
-    const matchedNodeIds = new Set<string>();
-    nodes.forEach((node) => {
-      if (!isSkillNode(node)) return;
-      const data = node.data as SkillData;
-      const haystack = `${data.name} ${data.description ?? ''}`.toLowerCase();
-      if (haystack.includes(query)) matchedNodeIds.add(node.id);
-    });
-
-    const pathNodeIds = new Set<string>(matchedNodeIds);
-    const pathEdgeIds = new Set<string>();
-
-    if (matchedNodeIds.size > 0) {
-      const incomingMap = new Map<string, AppEdge[]>();
-      edges.forEach((edge) => {
-        const list = incomingMap.get(edge.target);
-        if (list) {
-          list.push(edge);
-        } else {
-          incomingMap.set(edge.target, [edge]);
-        }
-      });
-
-      const stack = Array.from(matchedNodeIds);
-      while (stack.length > 0) {
-        const current = stack.pop();
-        if (!current) continue;
-        const incoming = incomingMap.get(current);
-        if (!incoming) continue;
-        incoming.forEach((edge) => {
-          pathEdgeIds.add(edge.id);
-          if (!pathNodeIds.has(edge.source)) {
-            pathNodeIds.add(edge.source);
-            stack.push(edge.source);
-          }
-        });
-      }
-    }
-
-    return {
-      query,
-      matchedNodeIds,
-      pathNodeIds,
-      pathEdgeIds,
-    };
-  }, [searchTerm, nodes, edges]);
+  const searchInfo = useMemo(() => computeSearchInfo(nodes, edges, searchTerm), [searchTerm, nodes, edges]);
 
   const searchActive = searchInfo.query.length > 0;
   const hasPathNodes = searchInfo.pathNodeIds.size > 0;
   const hasPathEdges = searchInfo.pathEdgeIds.size > 0;
 
+  // Recompute search highlighting data when filters change.
   const renderedNodes = useMemo(() => {
     if (!searchActive || !hasPathNodes) return nodes;
     return nodes.map((node) => {
@@ -646,6 +655,7 @@ export default function Flow({ treeId }: FlowProps) {
     });
   }, [nodes, searchActive, hasPathNodes, searchInfo]);
 
+  // Dim non-path edges when search is active.
   const renderedEdges = useMemo(() => {
     if (!searchActive || !hasPathEdges) return edges;
 
@@ -672,6 +682,7 @@ export default function Flow({ treeId }: FlowProps) {
   }, [edges, searchActive, hasPathEdges, searchInfo]);
 
   /** Changes (typed) */
+  // ReactFlow change handler for drag/move events.
   const onNodesChange: OnNodesChange<AppNode> = useCallback(
     (changes) => {
       const updates: { id: string; position: { x: number; y: number } }[] = [];
@@ -692,50 +703,25 @@ export default function Flow({ treeId }: FlowProps) {
         return next;
       });
       updates.forEach(({ id, position }) => {
-        void supabase.from('skill_nodes').update({ position }).eq('id', id);
+        void persistNodeUpdate(id, { position });
       });
     },
-    [sendNodePosition],
+    [sendNodePosition, persistNodeUpdate],
   );
 
+  // Lightweight passthrough for edge updates.
   const onEdgesChange: OnEdgesChange<AppEdge> = useCallback(
     (changes) => setEdges((eds) => applyEdgeChanges<AppEdge>(changes, eds)),
     [],
   );
 
+  // Detect if connecting `source -> target` would introduce a loop.
   const wouldCreateCycle = useCallback(
-    (sourceId?: string | null, targetId?: string | null) => {
-      if (!sourceId || !targetId) return false;
-      if (sourceId === targetId) return true;
-
-      const adjacency = new Map<string, string[]>();
-      edges.forEach(({ source, target }) => {
-        if (!source || !target) return;
-        const list = adjacency.get(source);
-        if (list) {
-          list.push(target);
-        } else {
-          adjacency.set(source, [target]);
-        }
-      });
-
-      const stack = [targetId];
-      const visited = new Set<string>();
-
-      while (stack.length > 0) {
-        const current = stack.pop();
-        if (!current || visited.has(current)) continue;
-        if (current === sourceId) return true;
-        visited.add(current);
-        const next = adjacency.get(current);
-        if (next) stack.push(...next);
-      }
-
-      return false;
-    },
+    (sourceId?: string | null, targetId?: string | null) => graphWouldCreateCycle(edges, sourceId, targetId),
     [edges],
   );
 
+  // Create an edge if it won't cause a cycle and persist it.
   const addEdgeSafely = useCallback(
     (connection: EdgeConnection) => {
       if (connection.source && connection.target && wouldCreateCycle(connection.source, connection.target)) {
@@ -783,6 +769,7 @@ export default function Flow({ treeId }: FlowProps) {
     [wouldCreateCycle, treeId, broadcastAction, lockNodeIfPrereqsMissing],
   );
 
+  // ReactFlow hook for new drag-to-connect edges.
   const onConnect: OnConnect = useCallback(
     (connection) => {
       addEdgeSafely(connection);
@@ -790,6 +777,7 @@ export default function Flow({ treeId }: FlowProps) {
     [addEdgeSafely],
   );
 
+  // Allow users to reconnect existing edges without deleting.
   const onReconnect = useCallback(
     (oldEdge: AppEdge, newConnection: Connection) => {
       setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds));
@@ -797,36 +785,17 @@ export default function Flow({ treeId }: FlowProps) {
     [setEdges],
   );
 
-  const startEditNode = useCallback(
-    (id: string) => {
-      const node = nodes.find(
-        (n): n is SkillNode => isSkillNode(n) && n.id === id,
-      );
-      if (!node) return;
-      const data = node.data as SkillData;
-      setEditName(data.name ?? '');
-      setEditDescription(data.description ?? '');
-      setEditCost(
-        typeof data.cost === 'number' && Number.isFinite(data.cost)
-          ? String(data.cost)
-          : '',
-      );
-      setEditLevel(
-        typeof data.level === 'number' && Number.isFinite(data.level)
-          ? String(data.level)
-          : '',
-      );
-      setEditingNodeId(id);
-    },
-    [nodes],
-  );
-
+  // Hide the edit modal without saving changes.
   const closeEditModal = useCallback(() => {
     setEditingNodeId(null);
   }, []);
 
+  // Persist edit modal changes to both state and Supabase.
   const handleEditSave = useCallback(() => {
     if (!editingNodeId) return;
+    const editingNode = findSkillNode(editingNodeId);
+    const editingPosition = editingNode?.position;
+
     const safeNumber = (value: string, fallback?: number) => {
       const trimmed = value.trim();
       if (trimmed === '') return undefined;
@@ -865,21 +834,22 @@ export default function Flow({ treeId }: FlowProps) {
     setEditingNodeId(null);
     if (!nodeUpdated) return;
     broadcastAction(`Updated "${updatedName}"`);
-    void supabase
-      .from('skill_nodes')
-      .update({
-        name: updatedName,
-        description: updatedDescription ?? null,
-        cost: typeof updatedCost === 'number' ? updatedCost : null,
-        level: typeof updatedLevel === 'number' ? updatedLevel : null,
-      })
-      .eq('id', editingNodeId)
-      .then(({ error }) => {
-        if (error) toast.error('Failed to update node');
-      });
-  }, [editingNodeId, editName, editDescription, editCost, editLevel, resetNode, setNodes, startEditNode, broadcastAction]);
+    const payload: Record<string, unknown> = {
+      name: updatedName,
+      description: updatedDescription ?? null,
+      cost: typeof updatedCost === 'number' ? updatedCost : null,
+      level: typeof updatedLevel === 'number' ? updatedLevel : null,
+    };
+    if (editingPosition && Number.isFinite(editingPosition.x) && Number.isFinite(editingPosition.y)) {
+      payload.position = editingPosition;
+    }
+    void persistNodeUpdate(editingNodeId, payload).then(({ error }) => {
+      if (error) toast.error('Failed to update node');
+    });
+  }, [editingNodeId, editName, editDescription, editCost, editLevel, resetNode, setNodes, startEditNode, broadcastAction, persistNodeUpdate, findSkillNode]);
 
   /** Build new node (starts locked) */
+  // Build a new local node + insert it into Supabase.
   const buildNode = useCallback(
     (position: { x: number; y: number }): SkillNode => {
       const id = generateId();
@@ -938,6 +908,7 @@ export default function Flow({ treeId }: FlowProps) {
   );
 
   /** Place by clicking the pane */
+  // When in place mode, clicking the canvas drops a new node.
   const handlePaneClick = useCallback(
     (evt: React.MouseEvent) => {
       if (!placeMode) return;
@@ -964,6 +935,7 @@ export default function Flow({ treeId }: FlowProps) {
   );
 
   /** Add at center */
+  // Drop a new node in the center of the current viewport.
   const addAtCenter = useCallback(() => {
     const renderer = document.querySelector(
       '.react-flow__renderer',
@@ -993,7 +965,35 @@ export default function Flow({ treeId }: FlowProps) {
     }
   }, [screenToFlowPosition, buildNode, autoConnect, selectedNodeIds, addEdgeSafely, setNodes, broadcastAction]);
 
+  // Hide the sidebar on small screens to keep the canvas accessible.
+  const closeSidebarForMobile = useCallback(() => {
+    if (window.innerWidth <= 768) setSidebarOpen(false);
+  }, [setSidebarOpen]);
+  
+  // Toggle click-to-place mode (closing sidebar on mobile).
+  const handleTogglePlaceMode = useCallback(() => {
+    closeSidebarForMobile();
+    setPlaceMode((v) => !v);
+  }, [closeSidebarForMobile, setPlaceMode]);
+
+  // Wrapper so sidebar button can reuse addAtCenter logic.
+  const handleAddAtCenterFromSidebar = useCallback(() => {
+    closeSidebarForMobile();
+    addAtCenter();
+  }, [closeSidebarForMobile, addAtCenter]);
+
+  // Open the share modal from the sidebar.
+  const handleOpenShareModal = useCallback(() => {
+    setShareModalOpen(true);
+  }, [setShareModalOpen]);
+
+  // Close the sidebar (used on mobile overlay).
+  const handleSidebarClose = useCallback(() => {
+    setSidebarOpen(false);
+  }, [setSidebarOpen]);
+
   /** Selection handler (typed) */
+  // Keep selection state in sync with ReactFlow's internal store.
   const onSelectionChange = useCallback(
     ({ nodes: ns, edges: es }: { nodes: AppNode[]; edges: AppEdge[] }) => {
       const nodeIds = ns.map((n) => n.id);
@@ -1006,6 +1006,7 @@ export default function Flow({ treeId }: FlowProps) {
   );
 
   /** Unlock on node click if prerequisites met */
+  // Unlock a node when its prerequisites are met and it is clicked.
   const onNodeClick: NodeMouseHandler<AppNode> = useCallback(
     (_evt, node) => {
       if (!isSkillNode(node)) return;
@@ -1045,23 +1046,22 @@ export default function Flow({ treeId }: FlowProps) {
         });
       });
       if (unlockedCurrent) {
-        void supabase
-          .from('skill_nodes')
-          .update({ unlocked: true })
-          .eq('id', node.id)
-          .then(() => {
-            const data = node.data as SkillData;
-            broadcastAction(`Unlocked "${data.name}"`);
-          });
+        void persistNodeUpdate(node.id, { unlocked: true }).then(() => {
+          const data = node.data as SkillData;
+          broadcastAction(`Unlocked "${data.name}"`);
+        });
       }
     },
-    [edges, setNodes, broadcastAction],
+    [edges, setNodes, broadcastAction, persistNodeUpdate],
   );
 
   /** Delete selected */
+  // Remove selected nodes/edges from both UI and Supabase.
   const deleteSelected = useCallback(() => {
-    const nodesToDelete = nodes.filter((n) => selectedNodeIds.includes(n.id));
-    const edgesToDelete = edges.filter((e) => selectedEdgeIds.includes(e.id));
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+    const nodesToDelete = currentNodes.filter((n) => selectedNodeIds.includes(n.id));
+    const edgesToDelete = currentEdges.filter((e) => selectedEdgeIds.includes(e.id));
     if (nodesToDelete.length === 0 && edgesToDelete.length === 0) return;
 
     deleteElements({ nodes: nodesToDelete, edges: edgesToDelete });
@@ -1078,9 +1078,10 @@ export default function Flow({ treeId }: FlowProps) {
     if (nodesToDelete.length > 0 || edgesToDelete.length > 0) {
       broadcastAction('Deleted selection', { refetch: true });
     }
-  }, [deleteElements, nodes, edges, selectedNodeIds, selectedEdgeIds, broadcastAction]);
+  }, [deleteElements, selectedNodeIds, selectedEdgeIds, broadcastAction]);
 
   /** Detach selected nodes */
+  // Delete edges attached to currently selected nodes.
   const detachSelectedNodes = useCallback(() => {
     if (selectedNodeIds.length === 0) return;
     setEdges((eds) =>
@@ -1095,10 +1096,11 @@ export default function Flow({ treeId }: FlowProps) {
     broadcastAction('Detached selected nodes');
   }, [selectedNodeIds, setEdges, broadcastAction]);
 
+  // Wipe the canvas and reseed from the default template.
   const handleResetTree = useCallback(async () => {
     setTreeLoading(true);
     const { seededNodes, seededEdges } = buildSeedGraph();
-    setNodes(seededNodes);
+    setNodes(decorateNodes(seededNodes));
     setEdges(seededEdges);
     try {
       await supabase.from('skill_edges').delete().eq('tree_id', treeId);
@@ -1136,51 +1138,10 @@ export default function Flow({ treeId }: FlowProps) {
     } finally {
       setTreeLoading(false);
     }
-  }, [treeId, broadcastAction]);
-
-  const closeSidebarForMobile = () => {
-    if (window.innerWidth <= 768) setSidebarOpen(false);
-  };
-
-
-  /** Ensure all skill nodes have reset/edit handlers */
-  useEffect(() => {
-    setNodes((prev) => {
-      let changed = false;
-      const next = prev.map((node) => {
-        if (!isSkillNode(node)) return node;
-        const data = node.data as SkillData;
-        let nodeChanged = false;
-        const nextData = { ...data } as SkillData;
-        if (typeof data.onReset !== 'function') {
-          nextData.onReset = () => resetNode(node.id);
-          nodeChanged = true;
-        }
-        if (typeof data.onEdit !== 'function') {
-          nextData.onEdit = () => startEditNode(node.id);
-          nodeChanged = true;
-        }
-        let styleChanged = false;
-        const nextStyle = { ...(node.style ?? {}) };
-        if (typeof nextStyle.width !== 'number') {
-          nextStyle.width = DEFAULT_NODE_STYLE.width;
-          styleChanged = true;
-        }
-        if (typeof nextStyle.minHeight !== 'number') {
-          nextStyle.minHeight = DEFAULT_NODE_STYLE.minHeight;
-          styleChanged = true;
-        }
-        if (nodeChanged || styleChanged) {
-          changed = true;
-          return { ...node, data: nextData, style: nextStyle } as SkillNode;
-        }
-        return node;
-      });
-      return changed ? next : prev;
-    });
-  }, [resetNode, startEditNode, setNodes]);
+  }, [treeId, broadcastAction, decorateNodes]);
 
   /** Automatically re-open the sidebar when the screen expands past 768px */
+  // Ensure the sidebar doesn't stay hidden when the viewport widens.
   useEffect(() => {
     const handleResize = () => {
       if (window.innerWidth >= 768) {
@@ -1192,6 +1153,7 @@ export default function Flow({ treeId }: FlowProps) {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  // Translate pointer movement into flow coordinates for remote cursors.
   const handlePointerMove = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
       const flowPos = screenToFlowPosition({ x: event.clientX, y: event.clientY });
@@ -1200,6 +1162,7 @@ export default function Flow({ treeId }: FlowProps) {
     [screenToFlowPosition, sendCursorPosition],
   );
 
+  // Signal to collaborators that our cursor left the canvas.
   const handlePointerLeave = useCallback(() => {
     const channel = presenceChannelRef.current;
     if (!channel) return;
@@ -1251,6 +1214,7 @@ export default function Flow({ treeId }: FlowProps) {
           <SkillSidebar
             treeId={treeId}
             treeTitle={treeTitle}
+            onTreeTitleChange={persistTreeTitle}
             canResetTree={hasExistingTree}
             onResetTree={hasExistingTree ? handleResetTree : undefined}
             name={name}
@@ -1269,19 +1233,13 @@ export default function Flow({ treeId }: FlowProps) {
             onCostChange={setCost}
             onLevelChange={setLevel}
             onSearchChange={setSearchTerm}
-            onTogglePlaceMode={() => {
-              closeSidebarForMobile();
-              setPlaceMode((v) => !v);
-            }}
-            onAddAtCenter={() => {
-              closeSidebarForMobile();
-              addAtCenter();
-            }}
+            onTogglePlaceMode={handleTogglePlaceMode}
+            onAddAtCenter={handleAddAtCenterFromSidebar}
             onDeleteSelected={deleteSelected}
             onDetachSelected={detachSelectedNodes}
             onToggleAutoConnect={setAutoConnect}
-            onOpenShareModal={() => setShareModalOpen(true)}
-            onClose={() => setSidebarOpen(false)}
+            onOpenShareModal={handleOpenShareModal}
+            onClose={handleSidebarClose}
           />
         </motion.div>
 
@@ -1382,78 +1340,22 @@ export default function Flow({ treeId }: FlowProps) {
         onSave={handleEditSave}
       />
       <ToastContainer position="bottom-right" autoClose={3200} pauseOnHover closeOnClick theme="dark" />
-      {shareModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-          <div className="absolute inset-0 bg-black/60" onClick={() => setShareModalOpen(false)} />
-          <div className="relative z-10 w-full max-w-md rounded-2xl bg-zinc-900 p-6 text-white shadow-xl">
-            <h2 className="text-xl font-semibold">Share this tree</h2>
-            <p className="mt-1 text-sm text-white/70">Give collaborators the link and password (if set).</p>
-            <div className="mt-4">
-              <label className="text-xs uppercase text-white/60">Tree link</label>
-              <div className="mt-1 flex items-center gap-2 rounded border border-white/20 bg-black/30 px-3 py-2 text-sm">
-                <span className="flex-1 truncate font-mono">{shareLink}</span>
-                <button
-                  type="button"
-                  onClick={handleCopyShareLink}
-                  className="rounded bg-white/10 px-2 py-1 text-xs"
-                >
-                  {shareCopied ? 'Copied' : 'Copy'}
-                </button>
-              </div>
-            </div>
-            <div className="mt-4">
-              <label className="text-xs uppercase text-white/60">Tree ID</label>
-              <div className="mt-1 rounded border border-white/20 bg-black/30 px-3 py-2 font-mono text-sm">{treeId}</div>
-            </div>
-            <div className="mt-4">
-              <label className="text-xs uppercase text-white/60">Password</label>
-              <input
-                type="text"
-                value={newPasswordInput}
-                onChange={(e) => setNewPasswordInput(e.target.value)}
-                placeholder={hasTreePassword ? 'Enter new password to replace current' : 'Set optional password'}
-                className="mt-1 w-full rounded border border-white/20 bg-black/30 px-3 py-2 text-sm"
-              />
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={handlePasswordUpdate}
-                  disabled={passwordSaving}
-                  className="rounded bg-white px-3 py-2 text-xs font-semibold text-black disabled:opacity-60"
-                >
-                  {passwordSaving ? 'Saving…' : hasTreePassword ? 'Update password' : 'Set password'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRemovePassword}
-                  disabled={passwordSaving || !hasTreePassword}
-                  className="rounded border border-white/30 px-3 py-2 text-xs text-white/80 disabled:opacity-40"
-                >
-                  Remove password
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShareModalOpen(false)}
-                  className="ml-auto rounded border border-white/30 px-3 py-2 text-xs text-white/80"
-                >
-                  Close
-                </button>
-              </div>
-              {lastSharedPassword && (
-                <p className="mt-2 text-xs text-emerald-300">
-                  Share this password: <span className="font-mono">{lastSharedPassword}</span>
-                </p>
-              )}
-              {passwordMessage && <p className="mt-2 text-xs text-white/70">{passwordMessage}</p>}
-              {hasTreePassword && !lastSharedPassword && (
-                <p className="mt-2 text-xs text-amber-300">
-                  A password is already set. Enter a new one above if you need to share it with someone.
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <ShareTreeModal
+        visible={shareModalOpen}
+        shareLink={shareLink}
+        treeId={treeId}
+        shareCopied={shareCopied}
+        hasTreePassword={hasTreePassword}
+        newPasswordInput={newPasswordInput}
+        passwordSaving={passwordSaving}
+        passwordMessage={passwordMessage}
+        lastSharedPassword={lastSharedPassword}
+        onCopyLink={handleCopyShareLink}
+        onChangePasswordInput={setNewPasswordInput}
+        onUpdatePassword={handlePasswordUpdate}
+        onRemovePassword={handleRemovePassword}
+        onClose={() => setShareModalOpen(false)}
+      />
     </div>
   );
 }
