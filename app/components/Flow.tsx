@@ -121,7 +121,13 @@ export default function Flow({ treeId }: FlowProps) {
       if (!('position' in payload) && existing?.position) {
         payload.position = existing.position;
       }
-      return supabase.from('skill_nodes').update(payload).eq('id', id).eq('tree_id', treeId);
+      return supabase
+        .from('skill_nodes')
+        .update(payload)
+        .eq('id', id)
+        .eq('tree_id', treeId)
+        .select('id,name,description,cost,level,unlocked,position')
+        .single();
     },
     [findSkillNode, treeId],
   );
@@ -256,7 +262,11 @@ export default function Flow({ treeId }: FlowProps) {
         }),
       );
       if (!changed) return;
-      void persistNodeUpdate(id, { unlocked: false });
+      void persistNodeUpdate(id, { unlocked: false }).then(({ error }) => {
+        if (error) {
+          toast.error('Failed to lock node');
+        }
+      });
       if (!options?.silent) {
         broadcastAction(options?.reason ?? `Locked "${nodeName ?? 'Skill'}"`, { refetch: true });
       }
@@ -703,7 +713,9 @@ export default function Flow({ treeId }: FlowProps) {
         return next;
       });
       updates.forEach(({ id, position }) => {
-        void persistNodeUpdate(id, { position });
+        void persistNodeUpdate(id, { position }).then(({ error }) => {
+          if (error) toast.error('Failed to update node position');
+        });
       });
     },
     [sendNodePosition, persistNodeUpdate],
@@ -844,7 +856,9 @@ export default function Flow({ treeId }: FlowProps) {
       payload.position = editingPosition;
     }
     void persistNodeUpdate(editingNodeId, payload).then(({ error }) => {
-      if (error) toast.error('Failed to update node');
+      if (error) {
+        toast.error('Failed to update node');
+      }
     });
   }, [editingNodeId, editName, editDescription, editCost, editLevel, resetNode, setNodes, startEditNode, broadcastAction, persistNodeUpdate, findSkillNode]);
 
@@ -1053,8 +1067,12 @@ export default function Flow({ treeId }: FlowProps) {
         });
       });
       if (unlockedCurrent) {
-        void persistNodeUpdate(node.id, { unlocked: true }).then(() => {
-          broadcastAction(`Unlocked "${unlockedTargetName ?? 'Skill'}"`, { refetch: true });
+        void persistNodeUpdate(node.id, { unlocked: true }).then(({ error }) => {
+          if (error) {
+            toast.error('Failed to unlock node');
+          } else {
+            broadcastAction(`Unlocked "${unlockedTargetName ?? 'Skill'}"`, { refetch: true });
+          }
         });
       }
     },
