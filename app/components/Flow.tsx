@@ -121,9 +121,9 @@ export default function Flow({ treeId }: FlowProps) {
       if (!('position' in payload) && existing?.position) {
         payload.position = existing.position;
       }
-      return supabase.from('skill_nodes').update(payload).eq('id', id);
+      return supabase.from('skill_nodes').update(payload).eq('id', id).eq('tree_id', treeId);
     },
-    [findSkillNode],
+    [findSkillNode, treeId],
   );
 
   const shareLink = typeof window !== 'undefined' ? `${window.location.origin}/tree/${treeId}` : '';
@@ -258,7 +258,7 @@ export default function Flow({ treeId }: FlowProps) {
       if (!changed) return;
       void persistNodeUpdate(id, { unlocked: false });
       if (!options?.silent) {
-        broadcastAction(options?.reason ?? `Locked "${nodeName ?? 'Skill'}"`);
+        broadcastAction(options?.reason ?? `Locked "${nodeName ?? 'Skill'}"`, { refetch: true });
       }
     },
     [setNodes, broadcastAction, persistNodeUpdate],
