@@ -89,6 +89,7 @@ export default function Flow({ treeId }: FlowProps) {
   const displayName = useMemo(() => `User ${clientId.slice(-4)}`, [clientId]);
   const isMountedRef = useRef(true);
 
+  // Track whether the component is still mounted to avoid state updates post-unmount.
   useEffect(() => {
     isMountedRef.current = true;
     return () => {
@@ -96,10 +97,12 @@ export default function Flow({ treeId }: FlowProps) {
     };
   }, []);
 
+  // Keep refs in sync so callbacks can read the latest nodes without re-subscribing.
   useEffect(() => {
     nodesRef.current = nodes;
   }, [nodes]);
 
+  // Same for edges to power graph helpers without extra dependencies.
   useEffect(() => {
     edgesRef.current = edges;
   }, [edges]);
