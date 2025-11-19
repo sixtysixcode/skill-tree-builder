@@ -1001,8 +1001,14 @@ export default function Flow({ treeId }: FlowProps) {
 
       setSelectedNodeIds((prev) => (shallowEqual(prev, nodeIds) ? prev : nodeIds));
       setSelectedEdgeIds((prev) => (shallowEqual(prev, edgeIds) ? prev : edgeIds));
+
+      const firstSkill = ns.find((n): n is SkillNode => isSkillNode(n));
+      if (firstSkill) {
+        const name = (firstSkill.data as SkillData).name ?? 'Skill';
+        broadcastAction(`Activated "${name}"`);
+      }
     },
-    [setSelectedNodeIds, setSelectedEdgeIds],
+    [setSelectedNodeIds, setSelectedEdgeIds, broadcastAction],
   );
 
   /** Unlock on node click if prerequisites met */
