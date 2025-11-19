@@ -6,6 +6,7 @@ import { motion } from 'framer-motion';
 type SkillSidebarProps = {
   treeId: string;
   treeTitle: string;
+  onTreeTitleChange: (value: string) => void;
   name: string;
   description: string;
   cost: string;
@@ -34,6 +35,7 @@ type SkillSidebarProps = {
 export function SkillSidebar({
   treeId,
   treeTitle,
+  onTreeTitleChange,
   name,
   description,
   cost,
@@ -132,8 +134,25 @@ export function SkillSidebar({
       >
         <div className="flex items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl">{treeTitle}</h1>
-            <p className="text-xs text-white/60">ID: <span className="font-mono">{treeId}</span></p>
+            <label className="text-xs uppercase text-white/40" htmlFor="tree-title-input">
+              Tree title
+            </label>
+            <div className="mt-1 flex items-center gap-2">
+              <div className="relative flex-1">
+                <input
+                  id="tree-title-input"
+                  value={treeTitle}
+                  onChange={(e) => onTreeTitleChange(e.target.value)}
+                  className="w-full rounded bg-white/10 border border-white/20 px-3 py-1.5 text-lg font-semibold text-white pr-10 focus:border-white/40 focus:outline-none"
+                />
+                <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-white/60 text-sm">
+                  ✎
+                </span>
+              </div>
+            </div>
+            <p className="mt-1 text-xs text-white/60">
+              ID: <span className="font-mono">{treeId}</span>
+            </p>
             <div className="mt-2 flex flex-wrap gap-2">
               <button
                 type="button"
