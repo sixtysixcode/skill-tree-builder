@@ -1017,6 +1017,7 @@ export default function Flow({ treeId }: FlowProps) {
     (_evt, node) => {
       if (!isSkillNode(node)) return;
       let unlockedCurrent = false;
+      let unlockedTargetName = (node.data as SkillData).name;
       setNodes((prevNodes) => {
         const current = prevNodes.find(
           (n): n is SkillNode => isSkillNode(n) && n.id === node.id,
@@ -1053,8 +1054,7 @@ export default function Flow({ treeId }: FlowProps) {
       });
       if (unlockedCurrent) {
         void persistNodeUpdate(node.id, { unlocked: true }).then(() => {
-          const data = node.data as SkillData;
-          broadcastAction(`Unlocked "${data.name}"`);
+          broadcastAction(`Unlocked "${unlockedTargetName ?? 'Skill'}"`, { refetch: true });
         });
       }
     },
