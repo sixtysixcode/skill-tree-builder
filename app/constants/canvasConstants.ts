@@ -8,6 +8,8 @@ export const CYCLE_ERROR_MESSAGE = 'Circular skill connections are not allowed.'
 
 export const initialEdges: AppEdge[] = [{ id: 'e1-2', source: '1', target: '2', animated: true }];
 
+export const CURSOR_COLORS = ['#f97316', '#22d3ee', '#a855f7', '#facc15', '#34d399', '#fb7185', '#60a5fa'];
+
 export const initialNodes: AppNode[] = [
     {
       id: '1',
