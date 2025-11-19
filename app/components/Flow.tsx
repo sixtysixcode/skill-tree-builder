@@ -33,6 +33,7 @@ import { EditNodeModal } from './EditNodeModal';
 import { ShareTreeModal } from './ShareTreeModal';
 import type { SkillNode, SkillData, AppNode, AppEdge, FlowProps, EdgeConnection, RemoteCursor, SkillEdgeRow, SkillNodeRow } from '../types/skillTypes';
 import { shallowEqual, isSkillNode, generateId, mapNodeRow, buildSeedGraph, mapEdgeRow } from '../utils/helpers';
+import { computeSearchInfo, graphWouldCreateCycle } from '../utils/graphHelpers';
 import { CURSOR_COLORS, CYCLE_ERROR_MESSAGE, DEFAULT_EDGE_OPTIONS, DEFAULT_NODE_STYLE, DELETE_KEYS } from '../constants/canvasConstants';
 import { supabase } from '../lib/supabaseClient';
 import type { RealtimeChannel } from '@supabase/supabase-js';
@@ -616,63 +617,7 @@ export default function Flow({ treeId }: FlowProps) {
     };
   }, [treeId, clientId, displayName, userColor, fetchTreeData]);
 
-  const searchInfo = useMemo(() => {
-    const query = searchTerm.trim().toLowerCase();
-    if (!query) {
-      return {
-        query,
-        matchedNodeIds: new Set<string>(),
-        pathNodeIds: new Set<string>(),
-        pathEdgeIds: new Set<string>(),
-      };
-    }
-
-    /** Find nodes with name/description that matches the search query */
-    const matchedNodeIds = new Set<string>();
-    nodes.forEach((node) => {
-      if (!isSkillNode(node)) return;
-      const data = node.data as SkillData;
-      const haystack = `${data.name} ${data.description ?? ''}`.toLowerCase();
-      if (haystack.includes(query)) matchedNodeIds.add(node.id);
-    });
-
-    const pathNodeIds = new Set<string>(matchedNodeIds);
-    const pathEdgeIds = new Set<string>();
-
-    if (matchedNodeIds.size > 0) {
-      const incomingMap = new Map<string, AppEdge[]>();
-      edges.forEach((edge) => {
-        const list = incomingMap.get(edge.target);
-        if (list) {
-          list.push(edge);
-        } else {
-          incomingMap.set(edge.target, [edge]);
-        }
-      });
-
-      const stack = Array.from(matchedNodeIds);
-      while (stack.length > 0) {
-        const current = stack.pop();
-        if (!current) continue;
-        const incoming = incomingMap.get(current);
-        if (!incoming) continue;
-        incoming.forEach((edge) => {
-          pathEdgeIds.add(edge.id);
-          if (!pathNodeIds.has(edge.source)) {
-            pathNodeIds.add(edge.source);
-            stack.push(edge.source);
-          }
-        });
-      }
-    }
-
-    return {
-      query,
-      matchedNodeIds,
-      pathNodeIds,
-      pathEdgeIds,
-    };
-  }, [searchTerm, nodes, edges]);
+  const searchInfo = useMemo(() => computeSearchInfo(nodes, edges, searchTerm), [searchTerm, nodes, edges]);
 
   const searchActive = searchInfo.query.length > 0;
   const hasPathNodes = searchInfo.pathNodeIds.size > 0;
@@ -769,35 +714,7 @@ export default function Flow({ treeId }: FlowProps) {
 
   // Detect if connecting `source -> target` would introduce a loop.
   const wouldCreateCycle = useCallback(
-    (sourceId?: string | null, targetId?: string | null) => {
-      if (!sourceId || !targetId) return false;
-      if (sourceId === targetId) return true;
-
-      const adjacency = new Map<string, string[]>();
-      edges.forEach(({ source, target }) => {
-        if (!source || !target) return;
-        const list = adjacency.get(source);
-        if (list) {
-          list.push(target);
-        } else {
-          adjacency.set(source, [target]);
-        }
-      });
-
-      const stack = [targetId];
-      const visited = new Set<string>();
-
-      while (stack.length > 0) {
-        const current = stack.pop();
-        if (!current || visited.has(current)) continue;
-        if (current === sourceId) return true;
-        visited.add(current);
-        const next = adjacency.get(current);
-        if (next) stack.push(...next);
-      }
-
-      return false;
-    },
+    (sourceId?: string | null, targetId?: string | null) => graphWouldCreateCycle(edges, sourceId, targetId),
     [edges],
   );
 
